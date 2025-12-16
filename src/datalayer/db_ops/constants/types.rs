@@ -19,5 +19,4 @@ pub struct DbConfig {
 pub struct PoolStateTracker {
     pub db_config: DbConfig,
     pub current_connections: Vec<PoolConnection<Postgres>>,
-    pub current_connections_count: u32,
 }
