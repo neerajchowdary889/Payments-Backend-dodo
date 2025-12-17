@@ -22,9 +22,9 @@ processors:
         action: insert
 
 exporters:
-  # Export traces to Jaeger
-  jaeger:
-    endpoint: jaeger:14250
+  # Export traces to Jaeger via OTLP
+  otlp/jaeger:
+    endpoint: jaeger:4317
     tls:
       insecure: true
 
@@ -33,9 +33,9 @@ exporters:
     endpoint: "0.0.0.0:8889"
     namespace: payments_backend
 
-  # Log telemetry data for debugging
-  logging:
-    loglevel: info
+  # Debug telemetry data for debugging
+  debug:
+    verbosity: detailed
     sampling_initial: 5
     sampling_thereafter: 200
 
@@ -44,9 +44,9 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [jaeger, logging]
+      exporters: [otlp/jaeger, debug]
 
     metrics:
       receivers: [otlp]
       processors: [batch, resource]
-      exporters: [prometheus, logging]
+      exporters: [prometheus, debug]

@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   postgres:
@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: payments_db
     ports:
-      - "5432:5432"
+      - "5455:5432" # Host:Container - Expose on 5455 to avoid conflict with host PostgreSQL
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
@@ -22,12 +22,24 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
-      - "16686:16686"  # Jaeger UI
-      - "4317:4317"    # OTLP gRPC receiver
-      - "4318:4318"    # OTLP HTTP receiver
+      - "17686:16686" # Jaeger UI - Host:Container (avoid Windows reserved ports)
     environment:
       - COLLECTOR_OTLP_ENABLED=true
       - LOG_LEVEL=info
+
+  # OpenTelemetry Collector - receives traces & metrics, forwards to Jaeger
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "5317:4317" # OTLP gRPC receiver
+      - "5319:4318" # OTLP HTTP receiver
+      - "8889:8889" # Prometheus metrics endpoint
+    depends_on:
+      - jaeger
 
 volumes:
   postgres_data:

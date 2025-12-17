@@ -135,9 +135,17 @@ pub fn init_telemetry(config: Option<TelemetryConfig>) -> Result<(), Box<dyn std
             )
             .with_trace_config(
                 opentelemetry_sdk::trace::Config::default()
-                    .with_sampler(Sampler::AlwaysOn)
+                    // Use ParentBased sampler to reduce trace volume
+                    .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOn)))
                     .with_id_generator(RandomIdGenerator::default())
                     .with_resource(resource.clone()),
+            )
+            .with_batch_config(
+                opentelemetry_sdk::trace::BatchConfigBuilder::default()
+                    .with_max_queue_size(10000) // Increase channel size from default 2048
+                    .with_max_export_batch_size(2048) // Larger batches
+                    .with_scheduled_delay(std::time::Duration::from_secs(1)) // Export every 1s
+                    .build(),
             )
             .install_batch(runtime::Tokio)?;
 

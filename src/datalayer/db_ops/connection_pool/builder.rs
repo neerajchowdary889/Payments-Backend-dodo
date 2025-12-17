@@ -1,8 +1,7 @@
-use std::{time::Duration};
+use std::time::Duration;
 
 use crate::datalayer::db_ops::constants;
 use crate::datalayer::db_ops::constants::DbConfig;
-
 
 /*
 This is the default configuration for the database connection pool.

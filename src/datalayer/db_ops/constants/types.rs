@@ -29,3 +29,19 @@ pub struct PoolStateTracker {
     pub available_connections: AtomicU32,
     pub pool: Arc<PgPool>,
 }
+
+impl std::fmt::Debug for PoolStateTracker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PoolStateTracker")
+            .field("db_config", &self.db_config)
+            .field("connection_count", &self.current_connections.len())
+            .field(
+                "available_connections",
+                &self
+                    .available_connections
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            )
+            .field("max_connections", &self.db_config.max_connections)
+            .finish()
+    }
+}

@@ -10,13 +10,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize OpenTelemetry (tracing, metrics, and logging)
     init_telemetry(None)?;
 
-    println!("🚀 Starting Payments Backend Application...");
+    tracing::info!("Starting Payments Backend Application");
 
     // Initialize database with default configuration
     // This is idempotent - can be called multiple times safely
     let db_ops = initialize_database().await?;
 
-    println!("✅ Database initialized successfully!");
+    tracing::info!("Database initialized successfully");
 
     // Create router with all routes
     let app = create_router();
@@ -26,11 +26,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    println!("🎯 Server listening on http://{}", addr);
-    println!("📋 Available endpoints:");
-    println!("   - GET  /health           - Comprehensive health check");
-    println!("   - GET  /health/liveness  - Liveness probe");
-    println!("   - GET  /health/readiness - Readiness probe");
+    // Log server startup with structured telemetry
+    tracing::info!(
+        address = %addr,
+        port = %port,
+        "Server listening and ready to accept connections"
+    );
+
+    tracing::info!(
+        endpoints = ?vec![
+            "/health - health check",
+        ],
+        "Available API endpoints"
+    );
 
     // Start the server with graceful shutdown
     axum::serve(listener, app)
@@ -69,5 +77,5 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 
-    println!("\n🛑 Shutdown signal received, cleaning up...");
+    tracing::warn!("Shutdown signal received, cleaning up...");
 }

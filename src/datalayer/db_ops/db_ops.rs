@@ -4,7 +4,7 @@ use crate::datalayer::db_ops::db_health::{
     DatabaseHealth, TableVerification, check_database_health, verify_database_initialization,
 };
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::info;
 
 /// Database operations manager
 /// Provides high-level abstraction for database operations

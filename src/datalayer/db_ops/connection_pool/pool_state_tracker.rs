@@ -4,7 +4,7 @@ use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::atomic::{AtomicU32, Ordering};
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 /*
 This is the pool state tracker.
@@ -20,10 +20,10 @@ It will Eager load the minimum required connections while starting the applicati
   so we are eager loading only the minimum required connections.
   Remaining connections are pulled on demand.
 */
-
 impl PoolStateTracker {
     /// Creates a new pool state tracker (non-singleton version)
     /// For singleton access, use `new()` instead
+    #[instrument(fields(service = "PoolStateTracker"))]
     pub async fn init(db_config: DbConfig) -> Result<Self, sqlx::Error> {
         info!("Creating pool state tracker with hybrid loading strategy");
 
@@ -55,6 +55,7 @@ impl PoolStateTracker {
 
     /// Creates or returns the global singleton pool state tracker
     /// This is thread-safe and ensures only one instance is created
+    #[instrument(fields(service = "PoolStateTracker"))]
     pub async fn new(
         db_config: Option<DbConfig>,
     ) -> Result<&'static PoolStateTracker, sqlx::Error> {
@@ -89,6 +90,7 @@ impl PoolStateTracker {
 
     /// Eager loads only the minimum required connections (min_connections)
     /// Remaining connections are loaded lazily on-demand
+    #[instrument(fields(service = "PoolStateTracker"))]
     pub async fn eager_load(&mut self) -> Result<(), sqlx::Error> {
         info!(
             "Eager loading {} core connections (min_connections)...",
@@ -123,6 +125,7 @@ impl PoolStateTracker {
     /// Acquires a connection on-demand if pool has capacity
     /// Returns cached connection if available, otherwise acquires from pool
     /// Atomically decrements the available connection count
+    #[instrument(fields(service = "PoolStateTracker"))]
     pub async fn get_connection(&mut self) -> Result<PoolConnection<Postgres>, sqlx::Error> {
         // First, try to use cached connection
         if let Some(conn) = self.remove_connection() {
@@ -154,6 +157,7 @@ impl PoolStateTracker {
     /// Atomically increments the available connection count
     /// Cache only holds min_connections (core/hot connections)
     /// Lazy-loaded connections are dropped when returned
+    #[instrument(fields(service = "PoolStateTracker"))]
     pub fn return_connection(&mut self, conn: PoolConnection<Postgres>) {
         // Increment available connections atomically
         let prev = self.available_connections.fetch_add(1, Ordering::SeqCst);
@@ -218,10 +222,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_hybrid_loading_eager_only_min_connections() {
+        use crate::datalayer::db_ops::constants;
         println!("\n=== TEST: Hybrid Loading - Eager Only Min Connections ===");
 
         // Skip if DATABASE_URL is not set
-        if std::env::var("DATABASE_URL").is_err() {
+        if std::env::var("DATABASE_URL").is_err() && constants::URL == "" {
             println!("⚠️  Skipping test: DATABASE_URL not set");
             return;
         }
