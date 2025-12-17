@@ -1,10 +1,10 @@
+use crate::datalayer::db_ops::constants::constants::POOL_STATE_TRACKER;
 use crate::datalayer::db_ops::constants::types::{DbConfig, PoolStateTracker};
 use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::{error, info};
-use crate::datalayer::db_ops::constants::constants::POOL_STATE_TRACKER;
 
 /*
 This is the pool state tracker.
@@ -58,14 +58,13 @@ impl PoolStateTracker {
     pub async fn new(
         db_config: Option<DbConfig>,
     ) -> Result<&'static PoolStateTracker, sqlx::Error> {
-
         // Check if already initialized
         // Idempotent function
         if let Some(tracker) = POOL_STATE_TRACKER.get() {
             return Ok(tracker);
         }
 
-        // If no db_config is provided, return error 
+        // If no db_config is provided, return error
         if db_config.is_none() {
             error!("Database configuration is not initialized and no existing tracker found");
             return Err(sqlx::Error::Io(std::io::Error::new(
@@ -86,16 +85,6 @@ impl PoolStateTracker {
                 Ok(POOL_STATE_TRACKER.get().unwrap())
             }
         }
-    }
-
-    /// Returns the current number of tracked connections
-    fn connection_count(&self) -> usize {
-        self.current_connections.len()
-    }
-
-    /// Returns the current number of available connections (atomic read)
-    pub fn available_connections(&self) -> u32 {
-        self.available_connections.load(Ordering::SeqCst)
     }
 
     /// Eager loads only the minimum required connections (min_connections)
@@ -185,6 +174,15 @@ impl PoolStateTracker {
         }
     }
 
+    /// Returns the current number of tracked connections
+    fn connection_count(&self) -> usize {
+        self.current_connections.len()
+    }
+
+    /// Returns the current number of available connections (atomic read)
+    pub fn available_connections(&self) -> u32 {
+        self.available_connections.load(Ordering::SeqCst)
+    }
     /// Adds a connection to track
     pub fn add_connection(&mut self, conn: PoolConnection<Postgres>) {
         self.current_connections.push(conn);
@@ -220,82 +218,170 @@ mod tests {
 
     #[tokio::test]
     async fn test_hybrid_loading_eager_only_min_connections() {
+        println!("\n=== TEST: Hybrid Loading - Eager Only Min Connections ===");
+
         // Skip if DATABASE_URL is not set
         if std::env::var("DATABASE_URL").is_err() {
+            println!("⚠️  Skipping test: DATABASE_URL not set");
             return;
         }
 
+        println!("📋 Creating config: min=2, max=5");
         let config = DbConfig::default()
             .set_min_connections(2)
             .set_max_connections(5);
 
+        println!("🔧 Initializing PoolStateTracker...");
         let tracker = PoolStateTracker::init(config).await.unwrap();
+
+        println!("📊 Tracker initialized:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
+        println!("   - Max connections: {}", tracker.max_connections());
 
         // Should have eagerly loaded only min_connections
         assert_eq!(tracker.connection_count(), 2);
+        println!("✅ Test passed: Eagerly loaded exactly min_connections (2)");
     }
 
     #[tokio::test]
     async fn test_lazy_loading_on_demand() {
+        println!("\n=== TEST: Lazy Loading On Demand ===");
+
         if std::env::var("DATABASE_URL").is_err() {
+            println!("⚠️  Skipping test: DATABASE_URL not set");
             return;
         }
 
+        println!("📋 Creating config: min=1, max=3");
         let config = DbConfig::default()
             .set_min_connections(1)
             .set_max_connections(3);
 
+        println!("🔧 Initializing PoolStateTracker...");
         let mut tracker = PoolStateTracker::init(config).await.unwrap();
+
+        println!("📊 Initial state:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
         assert_eq!(tracker.connection_count(), 1);
 
         // Lazy load additional connection
+        println!("\n🔄 Getting connection from tracker...");
         let conn = tracker.get_connection().await.unwrap();
+
+        println!("📊 After get_connection:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
 
         // Connection was acquired (not from cache since cache is now empty)
         assert_eq!(tracker.connection_count(), 0);
+        println!("✅ Cache is now empty (connection was taken)");
 
         // Return connection to cache
+        println!("\n↩️  Returning connection to tracker...");
         tracker.return_connection(conn);
+
+        println!("📊 After return_connection:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
 
         // Should now have cached the connection
         assert_eq!(tracker.connection_count(), 1);
+        println!("✅ Test passed: Connection successfully returned to cache");
     }
 
     #[tokio::test]
     async fn test_connection_reuse_from_cache() {
+        println!("\n=== TEST: Connection Reuse From Cache ===");
+
         if std::env::var("DATABASE_URL").is_err() {
+            println!("⚠️  Skipping test: DATABASE_URL not set");
             return;
         }
 
+        println!("📋 Creating config: min=2, max=5");
         let config = DbConfig::default()
             .set_min_connections(2)
             .set_max_connections(5);
 
+        println!("🔧 Initializing PoolStateTracker...");
         let mut tracker = PoolStateTracker::init(config).await.unwrap();
+
+        println!("📊 Initial state:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
         assert_eq!(tracker.connection_count(), 2);
 
         // Get connection from cache
+        println!("\n🔄 Getting connection from cache...");
         let conn1 = tracker.get_connection().await.unwrap();
+
+        println!("📊 After get_connection:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
         assert_eq!(tracker.connection_count(), 1); // One removed from cache
+        println!("✅ One connection removed from cache");
 
         // Return it
+        println!("\n↩️  Returning connection back to cache...");
         tracker.return_connection(conn1);
+
+        println!("📊 After return_connection:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
         assert_eq!(tracker.connection_count(), 2); // Back in cache
+        println!("✅ Test passed: Connection successfully reused from cache");
     }
 
     #[tokio::test]
     async fn test_max_connections_respected() {
+        println!("\n=== TEST: Max Connections Respected ===");
+
         if std::env::var("DATABASE_URL").is_err() {
+            println!("⚠️  Skipping test: DATABASE_URL not set");
             return;
         }
 
+        println!("📋 Creating config: min=1, max=2");
         let config = DbConfig::default()
             .set_min_connections(1)
             .set_max_connections(2);
 
+        println!("🔧 Initializing PoolStateTracker...");
         let tracker = PoolStateTracker::init(config).await.unwrap();
+
+        println!("📊 Tracker state:");
+        println!("   - Cached connections: {}", tracker.connection_count());
+        println!(
+            "   - Available connections: {}",
+            tracker.available_connections()
+        );
+        println!("   - Max connections: {}", tracker.max_connections());
 
         // Verify max_connections is accessible
         assert_eq!(tracker.max_connections(), 2);
+        println!("✅ Test passed: Max connections correctly set to 2");
     }
 }

@@ -1,70 +1,73 @@
-use payments_backend_dodo::datalayer::{DbConfig, DbManager, initialize_database};
-use std::time::Duration;
-use tracing_subscriber;
+use payments_backend_dodo::{
+    datalayer::initialize_database, logging::init_telemetry, routes::create_router,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize logging
-    tracing_subscriber::fmt::init();
-
-    // Load environment variables
+    // Load environment variables first
     dotenvy::dotenv().ok();
+
+    // Initialize OpenTelemetry (tracing, metrics, and logging)
+    init_telemetry(None)?;
 
     println!("🚀 Starting Payments Backend Application...");
 
     // Initialize database with default configuration
     // This is idempotent - can be called multiple times safely
-    let db_manager = initialize_database().await?;
+    let db_ops = initialize_database().await?;
 
     println!("✅ Database initialized successfully!");
 
-    // Perform health check
-    match db_manager.health_check().await {
-        Ok(health) => {
-            println!("💚 Database Health Check:");
-            println!("   - Status: Healthy");
-            println!("   - Latency: {}ms", health.latency_ms);
-            println!("   - Pool Size: {}", health.pool_size);
-            println!("   - Idle Connections: {}", health.idle_connections);
-        }
-        Err(e) => {
-            eprintln!("❌ Database health check failed: {}", e);
-            return Err(e.into());
-        }
-    }
+    // Create router with all routes
+    let app = create_router();
 
-    // Example: Custom configuration
-    // let custom_config = DbConfig {
-    //     database_url: "postgres://user:pass@localhost:5432/mydb".to_string(),
-    //     max_connections: 20,
-    //     min_connections: 5,
-    //     connection_timeout: Duration::from_secs(30),
-    //     idle_timeout: Duration::from_secs(600),
-    //     max_lifetime: Duration::from_secs(1800),
-    // };
-    // let db_manager = DbManager::new(custom_config).await?;
+    // Get server address from environment or use default
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-    // Get pool reference for use in application
-    let pool = db_manager.pool();
+    println!("🎯 Server listening on http://{}", addr);
+    println!("📋 Available endpoints:");
+    println!("   - GET  /health           - Comprehensive health check");
+    println!("   - GET  /health/liveness  - Liveness probe");
+    println!("   - GET  /health/readiness - Readiness probe");
 
-    // Example query
-    let result: (i64,) = sqlx::query_as("SELECT $1")
-        .bind(42_i64)
-        .fetch_one(pool)
+    // Start the server with graceful shutdown
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    println!("✅ Test query result: {}", result.0);
-
-    println!("🎯 Application ready to handle requests!");
-
-    // In a real application, you would:
-    // 1. Start your web server (Axum)
-    // 2. Pass db_manager to your application state
-    // 3. Use it in your handlers
-
-    // Example: Graceful shutdown
-    // tokio::signal::ctrl_c().await?;
-    // db_manager.shutdown().await;
+    // Shutdown telemetry gracefully
+    payments_backend_dodo::logging::shutdown_telemetry();
 
     Ok(())
+}
+
+/// Handle graceful shutdown signals
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    println!("\n🛑 Shutdown signal received, cleaning up...");
 }

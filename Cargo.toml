@@ -26,16 +26,19 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Error handling
-anyhow = "1.0"
-thiserror = "1.0"
-
 # Environment variables
 dotenvy = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# OpenTelemetry
+opentelemetry = { version = "0.24", features = ["metrics", "trace"] }
+opentelemetry-otlp = { version = "0.17", features = ["metrics", "trace", "grpc-tonic"] }
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio", "metrics", "trace"] }
+opentelemetry-semantic-conventions = "0.16"
+tracing-opentelemetry = "0.25"
 
 # Async utilities
 async-trait = "0.1"
