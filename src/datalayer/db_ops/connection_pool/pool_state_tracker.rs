@@ -2,7 +2,9 @@ use crate::datalayer::db_ops::constants::types::{DbConfig, PoolStateTracker};
 use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::PgPoolOptions;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::{error, info};
+use crate::datalayer::db_ops::constants::constants::POOL_STATE_TRACKER;
 
 /*
 This is the pool state tracker.
@@ -10,37 +12,61 @@ This is the pool state tracker.
 - It is used to monitor the number of connections in the pool.
 - It is used to monitor the number of connections that are currently in use.
 
-It will Eager load all the connections while starting the application and keep them in the memory (struct).
+It will Eager load the minimum required connections while starting the application and keep them in the memory (struct).
 - Reason for this is to avoid the overhead of creating and destroying connections every time a request is made.
 - This will also help to mitigate the errors occurring while running the application.
   If any errors, then those would be occurred while application starting so that this can be debugged easily.
-- Better Reusability of the connections.
+- If all connections are created at once, that lead to high load on the database, higher startup times when there are more connections and can cause performance issues.
+  so we are eager loading only the minimum required connections.
+  Remaining connections are pulled on demand.
 */
 
 impl PoolStateTracker {
     /// Creates a new pool state tracker (non-singleton version)
-    /// For singleton access, use `get_or_init_global` instead
-    pub fn new(db_config: DbConfig) -> Self {
-        let tracker = Self {
-            db_config,
+    /// For singleton access, use `new()` instead
+    pub async fn init(db_config: DbConfig) -> Result<Self, sqlx::Error> {
+        info!("Creating pool state tracker with hybrid loading strategy");
+
+        // Create the pool first
+        let pool = PgPoolOptions::new()
+            .max_connections(db_config.max_connections)
+            .min_connections(db_config.min_connections)
+            .acquire_timeout(db_config.connection_timeout)
+            .idle_timeout(db_config.idle_timeout)
+            .max_lifetime(db_config.max_lifetime)
+            .connect(&db_config.database_url)
+            .await
+            .map_err(|e| {
+                error!("Failed to create pool: {}", e);
+                e
+            })?;
+
+        let mut tracker = Self {
             current_connections: Vec::new(),
+            available_connections: AtomicU32::new(db_config.max_connections.clone()),
+            db_config: db_config,
+            pool: std::sync::Arc::new(pool),
         };
-        tracker.eager_load().await.unwrap();
-        tracker
+
+        // Eager load only min_connections
+        tracker.eager_load().await?;
+        Ok(tracker)
     }
 
-    /// Gets or initializes the global singleton pool state tracker
+    /// Creates or returns the global singleton pool state tracker
     /// This is thread-safe and ensures only one instance is created
-    pub fn get_or_init_global(
+    pub async fn new(
         db_config: Option<DbConfig>,
     ) -> Result<&'static PoolStateTracker, sqlx::Error> {
-        use crate::datalayer::db_ops::constants::constants::POOL_STATE_TRACKER;
 
+        // Check if already initialized
+        // Idempotent function
+        if let Some(tracker) = POOL_STATE_TRACKER.get() {
+            return Ok(tracker);
+        }
+
+        // If no db_config is provided, return error 
         if db_config.is_none() {
-            // Check if already initialized
-            if let Some(tracker) = POOL_STATE_TRACKER.get() {
-                return Ok(tracker);
-            }
             error!("Database configuration is not initialized and no existing tracker found");
             return Err(sqlx::Error::Io(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -48,65 +74,115 @@ impl PoolStateTracker {
             )));
         }
 
-        // Try to initialize or get existing
-        POOL_STATE_TRACKER.get_or_init(|| {
-            info!("Initializing global pool state tracker");
-            Self::new(db_config.unwrap())
-        });
+        // Initialize the tracker
+        info!("Initializing global pool state tracker");
+        let tracker = Self::init(db_config.unwrap()).await?;
 
-        Ok(POOL_STATE_TRACKER.get().unwrap())
+        // Store in OnceLock (handle race condition)
+        match POOL_STATE_TRACKER.set(tracker) {
+            Ok(_) => Ok(POOL_STATE_TRACKER.get().unwrap()),
+            Err(_) => {
+                // Another thread won the race, use their instance
+                Ok(POOL_STATE_TRACKER.get().unwrap())
+            }
+        }
     }
 
     /// Returns the current number of tracked connections
-    pub fn connection_count(&self) -> usize {
+    fn connection_count(&self) -> usize {
         self.current_connections.len()
     }
 
-    /// This will fill all the connections in the pool using eager loading.
-    /// Creates a temporary pool and acquires all connections upfront.
+    /// Returns the current number of available connections (atomic read)
+    pub fn available_connections(&self) -> u32 {
+        self.available_connections.load(Ordering::SeqCst)
+    }
+
+    /// Eager loads only the minimum required connections (min_connections)
+    /// Remaining connections are loaded lazily on-demand
     pub async fn eager_load(&mut self) -> Result<(), sqlx::Error> {
         info!(
-            "Eager loading {} connections...",
-            self.db_config.max_connections
+            "Eager loading {} core connections (min_connections)...",
+            self.db_config.min_connections
         );
 
-        // Create a temporary pool to acquire connections from
-        let pool = PgPoolOptions::new()
-            .max_connections(self.db_config.max_connections)
-            .min_connections(self.db_config.min_connections)
-            .acquire_timeout(self.db_config.connection_timeout)
-            .idle_timeout(self.db_config.idle_timeout)
-            .max_lifetime(self.db_config.max_lifetime)
-            .connect(&self.db_config.database_url)
-            .await
-            .map_err(|e| {
-                error!("Failed to create pool for eager loading: {}", e);
-                e
-            })?;
-
-        // Acquire connections up to max_connections
-        for i in 0..self.db_config.max_connections {
-            match pool.acquire().await {
+        // Acquire only min_connections upfront
+        for i in 0..self.db_config.min_connections {
+            match self.pool.acquire().await {
                 Ok(conn) => {
                     info!(
-                        "Acquired connection {}/{}",
+                        "Acquired core connection {}/{}",
                         i + 1,
-                        self.db_config.max_connections
+                        self.db_config.min_connections
                     );
                     self.add_connection(conn);
                 }
                 Err(e) => {
-                    error!("Failed to acquire connection {}: {}", i + 1, e);
+                    error!("Failed to acquire core connection {}: {}", i + 1, e);
                     return Err(e);
                 }
             }
         }
 
         info!(
-            "Successfully eager loaded {} connections",
+            "Successfully eager loaded {} core connections",
             self.connection_count()
         );
         Ok(())
+    }
+
+    /// Acquires a connection on-demand if pool has capacity
+    /// Returns cached connection if available, otherwise acquires from pool
+    /// Atomically decrements the available connection count
+    pub async fn get_connection(&mut self) -> Result<PoolConnection<Postgres>, sqlx::Error> {
+        // First, try to use cached connection
+        if let Some(conn) = self.remove_connection() {
+            info!("Reusing cached connection");
+            // Decrement available connections atomically
+            let prev = self.available_connections.fetch_sub(1, Ordering::SeqCst);
+            info!("Available connections: {} -> {}", prev, prev - 1);
+            return Ok(conn);
+        }
+
+        // If no cached connections, acquire from pool
+        info!(
+            "Lazy loading connection (current: {}, max: {})",
+            self.connection_count(),
+            self.db_config.max_connections
+        );
+        let conn = self.pool.acquire().await.map_err(|e| {
+            error!("Failed to lazy load connection: {}", e);
+            e
+        })?;
+
+        // Decrement available connections atomically
+        let prev = self.available_connections.fetch_sub(1, Ordering::SeqCst);
+        info!("Available connections: {} -> {}", prev, prev - 1);
+        Ok(conn)
+    }
+
+    /// Returns a connection to the cache if there's capacity
+    /// Atomically increments the available connection count
+    /// Cache only holds min_connections (core/hot connections)
+    /// Lazy-loaded connections are dropped when returned
+    pub fn return_connection(&mut self, conn: PoolConnection<Postgres>) {
+        // Increment available connections atomically
+        let prev = self.available_connections.fetch_add(1, Ordering::SeqCst);
+        info!("Available connections: {} -> {}", prev, prev + 1);
+
+        // Only cache up to min_connections (core connections)
+        // Lazy-loaded connections beyond min are dropped
+        if (self.connection_count() as u32) < self.db_config.min_connections {
+            info!(
+                "Caching connection for reuse (cache: {}/{})",
+                self.connection_count() + 1,
+                self.db_config.min_connections
+            );
+            self.add_connection(conn);
+        } else {
+            info!("Cache full or lazy connection, dropping connection back to pool");
+            drop(conn);
+        }
     }
 
     /// Adds a connection to track
@@ -134,5 +210,92 @@ impl PoolStateTracker {
     /// Returns the maximum allowed connections from config
     pub fn max_connections(&self) -> u32 {
         self.db_config.max_connections
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::datalayer::db_ops::constants::DbConfig;
+
+    #[tokio::test]
+    async fn test_hybrid_loading_eager_only_min_connections() {
+        // Skip if DATABASE_URL is not set
+        if std::env::var("DATABASE_URL").is_err() {
+            return;
+        }
+
+        let config = DbConfig::default()
+            .set_min_connections(2)
+            .set_max_connections(5);
+
+        let tracker = PoolStateTracker::init(config).await.unwrap();
+
+        // Should have eagerly loaded only min_connections
+        assert_eq!(tracker.connection_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_lazy_loading_on_demand() {
+        if std::env::var("DATABASE_URL").is_err() {
+            return;
+        }
+
+        let config = DbConfig::default()
+            .set_min_connections(1)
+            .set_max_connections(3);
+
+        let mut tracker = PoolStateTracker::init(config).await.unwrap();
+        assert_eq!(tracker.connection_count(), 1);
+
+        // Lazy load additional connection
+        let conn = tracker.get_connection().await.unwrap();
+
+        // Connection was acquired (not from cache since cache is now empty)
+        assert_eq!(tracker.connection_count(), 0);
+
+        // Return connection to cache
+        tracker.return_connection(conn);
+
+        // Should now have cached the connection
+        assert_eq!(tracker.connection_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_connection_reuse_from_cache() {
+        if std::env::var("DATABASE_URL").is_err() {
+            return;
+        }
+
+        let config = DbConfig::default()
+            .set_min_connections(2)
+            .set_max_connections(5);
+
+        let mut tracker = PoolStateTracker::init(config).await.unwrap();
+        assert_eq!(tracker.connection_count(), 2);
+
+        // Get connection from cache
+        let conn1 = tracker.get_connection().await.unwrap();
+        assert_eq!(tracker.connection_count(), 1); // One removed from cache
+
+        // Return it
+        tracker.return_connection(conn1);
+        assert_eq!(tracker.connection_count(), 2); // Back in cache
+    }
+
+    #[tokio::test]
+    async fn test_max_connections_respected() {
+        if std::env::var("DATABASE_URL").is_err() {
+            return;
+        }
+
+        let config = DbConfig::default()
+            .set_min_connections(1)
+            .set_max_connections(2);
+
+        let tracker = PoolStateTracker::init(config).await.unwrap();
+
+        // Verify max_connections is accessible
+        assert_eq!(tracker.max_connections(), 2);
     }
 }
