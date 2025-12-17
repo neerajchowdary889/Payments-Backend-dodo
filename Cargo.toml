@@ -42,6 +42,8 @@ tracing-opentelemetry = "0.25"
 
 # Async utilities
 async-trait = "0.1"
+once_cell = "1.21.3"
+regex = "1.12.2"
 
 [dev-dependencies]
 # Testing

@@ -4,7 +4,7 @@ use crate::errors::errors::ServiceError;
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
-
+use crate::datalayer::CRUD::helper;
 /// Builder for creating new accounts
 #[derive(Debug, Default)]
 pub struct AccountBuilder {
@@ -53,6 +53,7 @@ impl AccountBuilder {
 
     /// Write the account to the database
     /// If pool is None, uses the global singleton pool
+    /// Atomic operation either commit or reject all changes
     pub async fn write_to_db(self, pool: Option<&Arc<PgPool>>) -> Result<Uuid, ServiceError> {
         // Validate required fields
         let business_name = self
@@ -62,10 +63,22 @@ impl AccountBuilder {
             .email
             .ok_or_else(|| ServiceError::MissingRequiredField("email".to_string()))?;
 
+        // Validate email format (basic check)
+        if !helper::email_regex::is_valid_email(&email) {
+            return Err(ServiceError::ValidationError(
+                "Invalid email format".to_string(),
+            ));
+        }
+
         // Use defaults for optional fields
         let currency = self.currency.unwrap_or_else(|| "USD".to_string());
         let balance = self.balance.unwrap_or(0);
         let status = self.status.unwrap_or_else(|| "active".to_string());
+
+        // Validate balance is non-negative
+        if balance < 0 {
+            return Err(ServiceError::InvalidTransactionAmount);
+        }
 
         // Get pool reference
         let pool = match pool {
@@ -78,25 +91,48 @@ impl AccountBuilder {
             }
         };
 
-        // Insert into database
-        let result = sqlx::query!(
+        // Use sqlx::query_as for better type safety
+        // This approach is cleaner and more maintainable than query!
+        let account_id = sqlx::query_scalar::<_, Uuid>(
             r#"
-            INSERT INTO accounts (business_name, email, currency, balance, status, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO accounts (
+                business_name,
+                email,
+                currency,
+                balance,
+                status,
+                metadata,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
             RETURNING id
             "#,
-            business_name,
-            email,
-            currency,
-            balance,
-            status,
-            self.metadata
         )
+        .bind(&business_name)
+        .bind(&email)
+        .bind(&currency)
+        .bind(balance)
+        .bind(&status)
+        .bind(&self.metadata)
         .fetch_one(pool.as_ref())
         .await
-        .map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        .map_err(|e| {
+            // Better error handling - check for specific errors
+            match &e {
+                sqlx::Error::Database(db_err) => {
+                    // Check for unique constraint violation (duplicate email)
+                    if db_err.code().as_deref() == Some("23505") {
+                        ServiceError::AccountAlreadyExists(email.clone())
+                    } else {
+                        ServiceError::DatabaseError(e.to_string())
+                    }
+                }
+                _ => ServiceError::DatabaseError(e.to_string()),
+            }
+        })?;
 
-        Ok(result.id)
+        Ok(account_id)
     }
 }
 
