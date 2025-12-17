@@ -28,6 +28,7 @@ pub enum ServiceError {
         available: i64,
     },
     InvalidTransactionAmount,
+    InvalidCurrency,
     TransactionNotFound(String),
     DuplicateTransaction(String), // For idempotency key conflicts
     InvalidTransactionType,
@@ -98,6 +99,8 @@ impl fmt::Display for ServiceError {
             ServiceError::InsufficientPermissions => {
                 write!(f, "Insufficient permissions for this operation")
             }
+
+            ServiceError::InvalidCurrency => write!(f, "Invalid currency"),
 
             ServiceError::AccountNotFound(id) => write!(f, "Account not found: {}", id),
             ServiceError::AccountAlreadyExists(id) => write!(f, "Account already exists: {}", id),
@@ -187,6 +190,8 @@ impl ServiceError {
             ServiceError::AccountNotFound(_)
             | ServiceError::TransactionNotFound(_)
             | ServiceError::WebhookNotFound(_) => StatusCode::NOT_FOUND,
+            
+            ServiceError::InvalidCurrency => StatusCode::BAD_REQUEST,
 
             // 409 Conflict
             ServiceError::AccountAlreadyExists(_)
@@ -239,6 +244,8 @@ impl ServiceError {
             ServiceError::AccountAlreadyExists(_) => "ACCOUNT_ALREADY_EXISTS",
             ServiceError::AccountInactive(_) => "ACCOUNT_INACTIVE",
             ServiceError::InvalidAccountId => "INVALID_ACCOUNT_ID",
+
+            ServiceError::InvalidCurrency => "INVALID_CURRENCY",
 
             ServiceError::InsufficientBalance { .. } => "INSUFFICIENT_BALANCE",
             ServiceError::InvalidTransactionAmount => "INVALID_TRANSACTION_AMOUNT",
