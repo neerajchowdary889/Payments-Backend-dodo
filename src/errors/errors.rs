@@ -13,7 +13,7 @@ pub enum ServiceError {
     InvalidApiKey,
     MissingApiKey,
     ApiKeyExpired,
-    InsufficientPermissions,
+    InsufficientPermissions(String),
 
     // Account Errors
     AccountNotFound(String),
@@ -96,8 +96,8 @@ impl fmt::Display for ServiceError {
             ServiceError::InvalidApiKey => write!(f, "Invalid API key provided"),
             ServiceError::MissingApiKey => write!(f, "API key is required"),
             ServiceError::ApiKeyExpired => write!(f, "API key has expired"),
-            ServiceError::InsufficientPermissions => {
-                write!(f, "Insufficient permissions for this operation")
+            ServiceError::InsufficientPermissions(reason) => {
+                write!(f, "Insufficient permissions for this operation: {}", reason)
             }
 
             ServiceError::InvalidCurrency => write!(f, "Invalid currency"),
@@ -184,7 +184,7 @@ impl ServiceError {
             | ServiceError::ApiKeyExpired => StatusCode::UNAUTHORIZED,
 
             // 403 Forbidden
-            ServiceError::InsufficientPermissions => StatusCode::FORBIDDEN,
+            ServiceError::InsufficientPermissions(_) => StatusCode::FORBIDDEN,
 
             // 404 Not Found
             ServiceError::AccountNotFound(_)
@@ -238,7 +238,7 @@ impl ServiceError {
             ServiceError::InvalidApiKey => "INVALID_API_KEY",
             ServiceError::MissingApiKey => "MISSING_API_KEY",
             ServiceError::ApiKeyExpired => "API_KEY_EXPIRED",
-            ServiceError::InsufficientPermissions => "INSUFFICIENT_PERMISSIONS",
+            ServiceError::InsufficientPermissions(_) => "INSUFFICIENT_PERMISSIONS",
 
             ServiceError::AccountNotFound(_) => "ACCOUNT_NOT_FOUND",
             ServiceError::AccountAlreadyExists(_) => "ACCOUNT_ALREADY_EXISTS",

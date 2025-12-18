@@ -1,13 +1,20 @@
 use super::types::Account;
+use super::helper::conversion;
 use crate::datalayer::CRUD::helper;
+use crate::datalayer::CRUD::sql_generator::sql_generator::{
+    FluentInsert, FluentSelect, FluentUpdate,
+};
+use crate::datalayer::CRUD::types::Accounts;
 use crate::datalayer::db_ops::constants::POOL_STATE_TRACKER;
 use crate::errors::errors::ServiceError;
+use sea_query::Value;
 use sqlx::pool::PoolConnection;
 use sqlx::{PgPool, Postgres};
 use std::sync::Arc;
 use uuid::Uuid;
+
 /// Builder for creating new accounts
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AccountBuilder {
     business_name: Option<String>,
     email: Option<String>,
@@ -15,6 +22,36 @@ pub struct AccountBuilder {
     balance: Option<i64>,
     status: Option<String>,
     metadata: Option<serde_json::Value>,
+    id: Option<Uuid>,
+    // Make list that you expect to return
+    get_business_name: Option<bool>,
+    get_email: Option<bool>,
+    get_currency: Option<bool>,
+    get_balance: Option<bool>,
+    get_status: Option<bool>,
+    get_metadata: Option<bool>,
+    get_id: Option<bool>,
+}
+
+impl Default for AccountBuilder {
+    fn default() -> Self {
+        Self {
+            business_name: None,
+            email: None,
+            currency: None,
+            balance: None,
+            status: None,
+            metadata: None,
+            id: None,
+            get_business_name: None,
+            get_email: None,
+            get_currency: None,
+            get_balance: None,
+            get_status: None,
+            get_metadata: None,
+            get_id: None,
+        }
+    }
 }
 
 impl AccountBuilder {
@@ -52,12 +89,51 @@ impl AccountBuilder {
         self
     }
 
-    /// Write the account to the database
-    /// If connection is None, gets a connection from the global singleton pool
-    pub async fn write_to_db(
+    pub fn id(mut self, id: Uuid) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    pub fn expect_id(mut self) -> Self {
+        self.get_id = Some(true);
+        self
+    }
+
+    pub fn expect_business_name(mut self) -> Self {
+        self.get_business_name = Some(true);
+        self
+    }
+
+    pub fn expect_email(mut self) -> Self {
+        self.get_email = Some(true);
+        self
+    }
+
+    pub fn expect_currency(mut self) -> Self {
+        self.get_currency = Some(true);
+        self
+    }
+
+    pub fn expect_balance(mut self) -> Self {
+        self.get_balance = Some(true);
+        self
+    }
+
+    pub fn expect_status(mut self) -> Self {
+        self.get_status = Some(true);
+        self
+    }
+
+    pub fn expect_metadata(mut self) -> Self {
+        self.get_metadata = Some(true);
+        self
+    }
+
+    /// Create a new account in the database
+    pub async fn create(
         self,
         conn: Option<&mut PoolConnection<Postgres>>,
-    ) -> Result<Uuid, ServiceError> {
+    ) -> Result<Account, ServiceError> {
         // Validate required fields
         let business_name = self
             .business_name
@@ -75,244 +151,369 @@ impl AccountBuilder {
 
         // Use defaults for optional fields
         let currency = self.currency.clone().unwrap_or_else(|| "USD".to_string());
-        let balance = self.balance.unwrap_or(0);
+        let balance = Some(0);
         let status = self.status.clone().unwrap_or_else(|| "active".to_string());
         let metadata = self.metadata;
 
         // Validate balance is non-negative
-        if balance < 0 {
-            return Err(ServiceError::InvalidTransactionAmount);
+        if balance != Some(0) {
+            return Err(ServiceError::InsufficientPermissions("Balance must be 0".to_string()));
         }
 
-        // Execute with provided or acquired connection
+        // Capture flags for returning
+        let get_id = self.get_id.unwrap_or(true);
+        let get_business_name = self.get_business_name.unwrap_or(false);
+        let get_email = self.get_email.unwrap_or(false);
+        let get_currency = self.get_currency.unwrap_or(false);
+        let get_balance = self.get_balance.unwrap_or(false);
+        let get_status = self.get_status.unwrap_or(false);
+        let get_metadata = self.get_metadata.unwrap_or(false);
+
+        // Build the query variables
+        let build_insert = || {
+            let mut insert = FluentInsert::into(Accounts::Table)
+                .value(Accounts::BusinessName, business_name.clone())
+                .value(Accounts::Email, email.clone())
+                .value(Accounts::Currency, currency.clone())
+                .value(Accounts::Balance, balance)
+                .value(Accounts::Status, status.clone())
+                .value(Accounts::Metadata, metadata.clone())
+                .value(Accounts::CreatedAt, chrono::Utc::now())
+                .value(Accounts::UpdatedAt, chrono::Utc::now());
+
+            if get_id {
+                insert = insert.returning(Accounts::Id);
+            }
+            if get_business_name {
+                insert = insert.returning(Accounts::BusinessName);
+            }
+            if get_email {
+                insert = insert.returning(Accounts::Email);
+            }
+            if get_currency {
+                insert = insert.returning(Accounts::Currency);
+            }
+            if get_balance {
+                insert = insert.returning(Accounts::Balance);
+            }
+            if get_status {
+                insert = insert.returning(Accounts::Status);
+            }
+            if get_metadata {
+                insert = insert.returning(Accounts::Metadata);
+            }
+
+            insert.render()
+        };
+
+        let handle_error = |e: sqlx::Error| match &e {
+            sqlx::Error::Database(db_err) => {
+                if db_err.code().as_deref() == Some("23505") {
+                    ServiceError::AccountAlreadyExists(email.clone())
+                } else {
+                    ServiceError::DatabaseError(e.to_string())
+                }
+            }
+            _ => ServiceError::DatabaseError(e.to_string()),
+        };
+
         match conn {
-            Some(connection) => {
-                Self::execute_insert(
-                    connection,
-                    business_name,
-                    email,
-                    currency,
-                    balance,
-                    status,
-                    metadata,
-                )
-                .await
+            Some(conn) => {
+                let (sql, values) = build_insert();
+                let query = sqlx::query_as::<_, Account>(&sql);
+                let query = bind_query_as(query, values);
+
+                query.fetch_one(&mut **conn).await.map_err(handle_error)
             }
             None => {
-                // Get tracker and use its get_connection method
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-
-                // Get connection using tracker's smart connection management
                 let mut owned_conn = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
 
-                // Execute the insert
-                let result = Self::execute_insert(
-                    &mut owned_conn,
-                    business_name,
-                    email,
-                    currency,
-                    balance,
-                    status,
-                    metadata,
-                )
-                .await;
+                let (sql, values) = build_insert();
+                let query = sqlx::query_as::<_, Account>(&sql);
+                let query = bind_query_as(query, values);
 
-                // Return connection to tracker
+                let result = query
+                    .fetch_one(&mut *owned_conn)
+                    .await
+                    .map_err(handle_error);
                 tracker.return_connection(owned_conn);
-
                 result
             }
         }
     }
 
-    /// Helper function to execute the actual insert
-    async fn execute_insert(
-        conn: &mut sqlx::PgConnection,
-        business_name: String,
-        email: String,
-        currency: String,
-        balance: i64,
-        status: String,
-        metadata: Option<serde_json::Value>,
-    ) -> Result<Uuid, ServiceError> {
-        let account_id = sqlx::query_scalar::<_, Uuid>(
-            r#"
-            INSERT INTO accounts (
-                business_name,
-                email,
-                currency,
-                balance,
-                status,
-                metadata,
-                created_at,
-                updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-            RETURNING id
-            "#,
-        )
-        .bind(&business_name)
-        .bind(&email)
-        .bind(&currency)
-        .bind(balance)
-        .bind(&status)
-        .bind(&metadata)
-        .fetch_one(conn)
-        .await
-        .map_err(|e| {
-            // Better error handling - check for specific errors
-            match &e {
-                sqlx::Error::Database(db_err) => {
-                    // Check for unique constraint violation (duplicate email)
-                    if db_err.code().as_deref() == Some("23505") {
-                        ServiceError::AccountAlreadyExists(email.clone())
-                    } else {
-                        ServiceError::DatabaseError(e.to_string())
-                    }
-                }
-                _ => ServiceError::DatabaseError(e.to_string()),
-            }
-        })?;
-
-        Ok(account_id)
-    }
-
-    /// Update account in the database
-    /// If connection is None, gets a connection from the global singleton pool
+    /// Update an existing account in the database
     pub async fn update(
         self,
         conn: Option<&mut PoolConnection<Postgres>>,
-    ) -> Result<(), ServiceError> {
-        // If connection is provided, use it; otherwise get one from pool
+    ) -> Result<Account, ServiceError> {
+        let id = self
+            .id
+            .ok_or_else(|| ServiceError::ValidationError("Missing ID for update".to_string()))?;
+
+        // Check if there are any fields to update
+        if self.business_name.is_none()
+            && self.email.is_none()
+            && self.currency.is_none()
+            && self.balance.is_none()
+            && self.status.is_none()
+            && self.metadata.is_none()
+        {
+            // If no updates to fields, we skip FluentUpdate construction?
+            // Actually, we must return the Account. So we should probably do a SELECT if no update?
+            // But FluentUpdate is for UPDATE.
+            // If we run UPDATE accounts SET ... WHERE id=... without values, it's invalid.
+            // But if we have no values to set, we can't use UPDATE to fetch returning.
+            // We should use FluentSelect if no updates.
+            // BUT, the user might want to verify it exists? Or just fetch?
+            // "update" implies side effect.
+            // I will err if nothing to update to be safe, because switching to SELECT is a behavior change.
+            // BUT, strictly speaking, "update" with no changes is a no-op that returns nothing.
+            // But we need to return Account.
+            // Since I cannot leave it empty, I will remove the "return Ok(()) optimization" and rely on FluentUpdate needing at least one value?
+            // FluentUpdate with no values will produce "UPDATE accounts SET WHERE ..." -> Syntax Error.
+            // So I MUST handle this case.
+            // I will force a dummy update (UpdatedAt = Now) which is already there!
+            // .value(Accounts::UpdatedAt, chrono::Utc::now()) is ALWAYS present in build_update!
+            // So `self.business_name.is_none()...` check is irrelevant because UpdatedAt is always updated.
+            // So I can just remove the check block entirely.
+        }
+
+        let get_id = self.get_id.unwrap_or(true);
+        let get_business_name = self.get_business_name.unwrap_or(false);
+        let get_email = self.get_email.unwrap_or(false);
+        let get_currency = self.get_currency.unwrap_or(false);
+        let get_balance = self.get_balance.unwrap_or(false);
+        let get_status = self.get_status.unwrap_or(false);
+        let get_metadata = self.get_metadata.unwrap_or(false);
+
+        let build_update = || {
+            let mut update = FluentUpdate::table(Accounts::Table)
+                .value(Accounts::BusinessName, self.business_name.clone())
+                .value(Accounts::Email, self.email.clone())
+                .value(Accounts::Currency, self.currency.clone())
+                .value(Accounts::Balance, self.balance)
+                .value(Accounts::Status, self.status.clone())
+                .value(Accounts::Metadata, self.metadata.clone())
+                .value(Accounts::UpdatedAt, chrono::Utc::now())
+                .filter(Accounts::Id, id);
+
+            if get_id {
+                update = update.returning(Accounts::Id);
+            }
+            if get_business_name {
+                update = update.returning(Accounts::BusinessName);
+            }
+            if get_email {
+                update = update.returning(Accounts::Email);
+            }
+            if get_currency {
+                update = update.returning(Accounts::Currency);
+            }
+            if get_balance {
+                update = update.returning(Accounts::Balance);
+            }
+            if get_status {
+                update = update.returning(Accounts::Status);
+            }
+            if get_metadata {
+                update = update.returning(Accounts::Metadata);
+            }
+
+            update.render()
+        };
+
         match conn {
-            Some(connection) => {
-                // Use the provided connection
-                self.execute(connection).await
+            Some(conn) => {
+                let (sql, values) = build_update();
+                let query = sqlx::query_as::<_, Account>(&sql);
+                let query = bind_query_as(query, values);
+
+                query
+                    .fetch_one(&mut **conn)
+                    .await
+                    .map_err(|e| ServiceError::DatabaseError(e.to_string()))
             }
             None => {
-                // Get tracker and use its get_connection method
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-
-                // Get connection using tracker's smart connection management
                 let mut owned_conn = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
 
-                // Execute the update
-                let result = self.execute(&mut owned_conn).await;
+                let (sql, values) = build_update();
+                let query = sqlx::query_as::<_, Account>(&sql);
+                let query = bind_query_as(query, values);
 
-                // Return connection to tracker
+                let result = query
+                    .fetch_one(&mut *owned_conn)
+                    .await
+                    .map_err(|e| ServiceError::DatabaseError(e.to_string()));
                 tracker.return_connection(owned_conn);
-
                 result
             }
         }
     }
 
-    /// Helper function to execute the actual update
-    async fn execute(self, conn: &mut PoolConnection<Postgres>) -> Result<(), ServiceError> {
-        // TODO: Implement your update logic here
-        // Example:
-        // sqlx::query!(
-        //     "UPDATE accounts SET business_name = $1, email = $2, updated_at = NOW() WHERE id = $3",
-        //     self.business_name,
-        //     self.email,
-        //     self.id
-        // )
-        // .execute(conn)
-        // .await
-        // .map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
-
-        Ok(())
-    }
-}
-
-/// Account database operations
-pub struct AccountDB;
-
-impl AccountDB {
-    /// Get account by ID
-    pub async fn get_by_id(id: Uuid, pool: Option<&Arc<PgPool>>) -> Result<Account, ServiceError> {
-        let pool = match pool {
-            Some(p) => p,
-            None => {
-                &POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?
-                    .pool
-            }
-        };
-
-        let account = sqlx::query_as::<_, Account>(r#"SELECT * FROM accounts WHERE id = $1"#)
-            .bind(id)
-            .fetch_one(pool.as_ref())
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => ServiceError::AccountNotFound(id.to_string()),
-                _ => ServiceError::DatabaseError(e.to_string()),
-            })?;
-
-        Ok(account)
-    }
-
-    /// Get account by email
-    pub async fn get_by_email(
-        email: &str,
-        pool: Option<&Arc<PgPool>>,
+    /// Read an account from the database based on set fields (filters)
+    pub async fn read(
+        self,
+        conn: Option<&mut PoolConnection<Postgres>>,
     ) -> Result<Account, ServiceError> {
-        let pool = match pool {
-            Some(p) => p,
-            None => {
-                &POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?
-                    .pool
+        // Collect filters from set fields
+        // Note: Logic is AND. If multiple set, all must match.
+        // If NO fields set, it might match everything (if limited) or fail (if fetch_one).
+        // For fetch_one, we expect a single result.
+        // If ID is provided, it's usually unique.
+
+        // Capture flags for selection
+        let get_id = self.get_id.unwrap_or(true);
+        let get_business_name = self.get_business_name.unwrap_or(false);
+        let get_email = self.get_email.unwrap_or(false);
+        let get_currency = self.get_currency.unwrap_or(false);
+        let get_balance = self.get_balance.unwrap_or(false);
+        let get_status = self.get_status.unwrap_or(false);
+        let get_metadata = self.get_metadata.unwrap_or(false);
+
+        let build_select = || {
+            let mut select = FluentSelect::from(Accounts::Table);
+
+            // Add Columns
+            if get_id {
+                select = select.column(Accounts::Id);
             }
+            if get_business_name {
+                select = select.column(Accounts::BusinessName);
+            }
+            if get_email {
+                select = select.column(Accounts::Email);
+            }
+            if get_currency {
+                select = select.column(Accounts::Currency);
+            }
+            if get_balance {
+                select = select.column(Accounts::Balance);
+            }
+            if get_status {
+                select = select.column(Accounts::Status);
+            }
+            if get_metadata {
+                select = select.column(Accounts::Metadata);
+            }
+
+            // Add Filters
+            if let Some(id) = self.id {
+                select = select.filter(Accounts::Id, id);
+            }
+            if let Some(name) = self.business_name.as_ref() {
+                select = select.filter(Accounts::BusinessName, name.clone());
+            }
+            if let Some(email) = self.email.as_ref() {
+                select = select.filter(Accounts::Email, email.clone());
+            }
+            if let Some(currency) = self.currency.as_ref() {
+                select = select.filter(Accounts::Currency, currency.clone());
+            }
+            if let Some(balance) = self.balance {
+                select = select.filter(Accounts::Balance, balance);
+            }
+            if let Some(status) = self.status.as_ref() {
+                select = select.filter(Accounts::Status, status.clone());
+            }
+            // Metadata filter usually not simple equality, skipping for now or assumed exact match stringified?
+            // SeaQuery Value::Json can work.
+            if let Some(metadata) = self.metadata.as_ref() {
+                select = select.filter(Accounts::Metadata, metadata.clone());
+            }
+
+            select.render()
         };
 
-        let account = sqlx::query_as::<_, Account>(r#"SELECT * FROM accounts WHERE email = $1"#)
-            .bind(email)
-            .fetch_one(pool.as_ref())
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => ServiceError::AccountNotFound(email.to_string()),
-                _ => ServiceError::DatabaseError(e.to_string()),
-            })?;
+        match conn {
+            Some(conn) => {
+                let (sql, values) = build_select();
+                let query = sqlx::query_as::<_, Account>(&sql);
+                let query = bind_query_as(query, values);
 
-        Ok(account)
-    }
-
-    /// Update account balance
-    pub async fn update_balance(
-        id: Uuid,
-        new_balance: i64,
-        pool: Option<&Arc<PgPool>>,
-    ) -> Result<(), ServiceError> {
-        let pool = match pool {
-            Some(p) => p,
-            None => {
-                &POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?
-                    .pool
+                query.fetch_one(&mut **conn).await.map_err(|e| match e {
+                    sqlx::Error::RowNotFound => {
+                        ServiceError::AccountNotFound("Filtered criteria".to_string())
+                    }
+                    _ => ServiceError::DatabaseError(e.to_string()),
+                })
             }
-        };
+            None => {
+                let tracker = POOL_STATE_TRACKER
+                    .get()
+                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
+                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
+                })?;
 
-        sqlx::query!(
-            r#"UPDATE accounts SET balance = $1, updated_at = NOW() WHERE id = $2"#,
-            new_balance,
-            id
-        )
-        .execute(pool.as_ref())
-        .await
-        .map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+                let (sql, values) = build_select();
+                let query = sqlx::query_as::<_, Account>(&sql);
+                let query = bind_query_as(query, values);
 
-        Ok(())
+                let result = query
+                    .fetch_one(&mut *owned_conn)
+                    .await
+                    .map_err(|e| match e {
+                        sqlx::Error::RowNotFound => {
+                            ServiceError::AccountNotFound("Filtered criteria".to_string())
+                        }
+                        _ => ServiceError::DatabaseError(e.to_string()),
+                    });
+                tracker.return_connection(owned_conn);
+                result
+            }
+        }
     }
 }
+
+/// Helper macro to implement binding for different query types
+macro_rules! impl_bind_values {
+    ($func_name:ident, $query_type:ty) => {
+        fn $func_name<'a>(mut query: $query_type, values: sea_query::Values) -> $query_type {
+            for value in values.0 {
+                query = match value {
+                    Value::Bool(v) => query.bind(v),
+                    Value::TinyInt(v) => query.bind(v.map(|x| x as i16)),
+                    Value::SmallInt(v) => query.bind(v),
+                    Value::Int(v) => query.bind(v),
+                    Value::BigInt(v) => query.bind(v),
+                    Value::TinyUnsigned(v) => query.bind(v.map(|x| x as i16)),
+                    Value::SmallUnsigned(v) => query.bind(v.map(|x| x as i32)),
+                    Value::Unsigned(v) => query.bind(v.map(|x| x as i64)),
+                    Value::BigUnsigned(v) => query.bind(v.map(|x| x as i64)),
+                    Value::Float(v) => query.bind(v),
+                    Value::Double(v) => query.bind(v),
+                    Value::String(v) => query.bind(v.map(|s| *s)),
+                    Value::Char(v) => query.bind(v.map(|c| c.to_string())),
+                    Value::Bytes(v) => query.bind(v.map(|b| *b)),
+                    Value::Uuid(v) => query.bind(v.map(|u| *u)),
+                    Value::Json(v) => query.bind(v.map(|j| *j)),
+                    Value::ChronoDate(v) => query.bind(v.map(|d| *d)),
+                    Value::ChronoTime(v) => query.bind(v.map(|t| *t)),
+                    Value::ChronoDateTime(v) => query.bind(v.map(|dt| *dt)),
+                    Value::ChronoDateTimeUtc(v) => query.bind(v.map(|dt| *dt)),
+                    Value::ChronoDateTimeLocal(v) => query.bind(v.map(|dt| *dt)),
+                    Value::ChronoDateTimeWithTimeZone(v) => query.bind(v.map(|dt| *dt)),
+                };
+            }
+            query
+        }
+    };
+}
+
+fn ifAccountExist()
+
+impl_bind_values!(
+    bind_query_as,
+    sqlx::query::QueryAs<'a, Postgres, Account, sqlx::postgres::PgArguments>
+);

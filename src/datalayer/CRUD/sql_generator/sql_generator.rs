@@ -36,7 +36,7 @@ fn is_value_none(val: &Value) -> bool {
 pub struct FluentInsert {
     table: Option<Alias>,
     values: Vec<(Alias, Value)>,
-    returning: Option<Alias>,
+    returning: Vec<Alias>,
 }
 
 impl FluentInsert {
@@ -44,7 +44,7 @@ impl FluentInsert {
         Self {
             table: Some(Alias::new(table.to_string())),
             values: vec![],
-            returning: None,
+            returning: vec![],
         }
     }
 
@@ -57,7 +57,7 @@ impl FluentInsert {
     }
 
     pub fn returning<C: Iden>(mut self, col: C) -> Self {
-        self.returning = Some(Alias::new(col.to_string()));
+        self.returning.push(Alias::new(col.to_string()));
         self
     }
 
@@ -74,8 +74,8 @@ impl FluentInsert {
         query.columns(cols);
         query.values_panic(vals.into_iter().map(|v| sea_query::SimpleExpr::Value(v)));
 
-        if let Some(ret) = self.returning {
-            query.returning(Query::returning().columns([ret]));
+        if !self.returning.is_empty() {
+            query.returning(Query::returning().columns(self.returning));
         }
 
         query.build(PostgresQueryBuilder)
@@ -189,7 +189,7 @@ pub struct FluentUpdate {
     table: Option<Alias>,
     values: Vec<(Alias, Value)>,
     filters: Vec<(Alias, Value)>,
-    returning: Option<Alias>,
+    returning: Vec<Alias>,
 }
 
 impl FluentUpdate {
@@ -198,7 +198,7 @@ impl FluentUpdate {
             table: Some(Alias::new(table.to_string())),
             values: vec![],
             filters: vec![],
-            returning: None,
+            returning: vec![],
         }
     }
 
@@ -220,7 +220,7 @@ impl FluentUpdate {
     }
 
     pub fn returning<C: Iden>(mut self, col: C) -> Self {
-        self.returning = Some(Alias::new(col.to_string()));
+        self.returning.push(Alias::new(col.to_string()));
         self
     }
 
@@ -243,8 +243,8 @@ impl FluentUpdate {
             query.and_where(Expr::col(col).eq(val));
         }
 
-        if let Some(ret) = self.returning {
-            query.returning(Query::returning().columns([ret]));
+        if !self.returning.is_empty() {
+            query.returning(Query::returning().columns(self.returning));
         }
 
         query.build(PostgresQueryBuilder)
@@ -256,7 +256,7 @@ impl FluentUpdate {
 pub struct FluentDelete {
     table: Option<Alias>,
     filters: Vec<(Alias, Value)>,
-    returning: Option<Alias>,
+    returning: Vec<Alias>,
 }
 
 impl FluentDelete {
@@ -264,7 +264,7 @@ impl FluentDelete {
         Self {
             table: Some(Alias::new(table.to_string())),
             filters: vec![],
-            returning: None,
+            returning: vec![],
         }
     }
 
@@ -277,7 +277,7 @@ impl FluentDelete {
     }
 
     pub fn returning<C: Iden>(mut self, col: C) -> Self {
-        self.returning = Some(Alias::new(col.to_string()));
+        self.returning.push(Alias::new(col.to_string()));
         self
     }
 
@@ -292,8 +292,8 @@ impl FluentDelete {
             query.and_where(Expr::col(col).eq(val));
         }
 
-        if let Some(ret) = self.returning {
-            query.returning(Query::returning().columns([ret]));
+        if !self.returning.is_empty() {
+            query.returning(Query::returning().columns(self.returning));
         }
 
         query.build(PostgresQueryBuilder)
