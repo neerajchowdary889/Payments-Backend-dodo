@@ -77,6 +77,7 @@ impl AccountBuilder {
         let currency = self.currency.clone().unwrap_or_else(|| "USD".to_string());
         let balance = self.balance.unwrap_or(0);
         let status = self.status.clone().unwrap_or_else(|| "active".to_string());
+        let metadata = self.metadata;
 
         // Validate balance is non-negative
         if balance < 0 {
@@ -86,8 +87,16 @@ impl AccountBuilder {
         // Execute with provided or acquired connection
         match conn {
             Some(connection) => {
-                self.execute_insert(connection, business_name, email, currency, balance, status)
-                    .await
+                Self::execute_insert(
+                    connection,
+                    business_name,
+                    email,
+                    currency,
+                    balance,
+                    status,
+                    metadata,
+                )
+                .await
             }
             None => {
                 // Get tracker and use its get_connection method
@@ -101,16 +110,16 @@ impl AccountBuilder {
                 })?;
 
                 // Execute the insert
-                let result = self
-                    .execute_insert(
-                        &mut owned_conn,
-                        business_name,
-                        email,
-                        currency,
-                        balance,
-                        status,
-                    )
-                    .await;
+                let result = Self::execute_insert(
+                    &mut owned_conn,
+                    business_name,
+                    email,
+                    currency,
+                    balance,
+                    status,
+                    metadata,
+                )
+                .await;
 
                 // Return connection to tracker
                 tracker.return_connection(owned_conn);
@@ -122,13 +131,13 @@ impl AccountBuilder {
 
     /// Helper function to execute the actual insert
     async fn execute_insert(
-        self,
-        conn: &mut PoolConnection<Postgres>,
+        conn: &mut sqlx::PgConnection,
         business_name: String,
         email: String,
         currency: String,
         balance: i64,
         status: String,
+        metadata: Option<serde_json::Value>,
     ) -> Result<Uuid, ServiceError> {
         let account_id = sqlx::query_scalar::<_, Uuid>(
             r#"
@@ -151,8 +160,8 @@ impl AccountBuilder {
         .bind(&currency)
         .bind(balance)
         .bind(&status)
-        .bind(&self.metadata)
-        .execute(conn)
+        .bind(&metadata)
+        .fetch_one(conn)
         .await
         .map_err(|e| {
             // Better error handling - check for specific errors
@@ -182,7 +191,7 @@ impl AccountBuilder {
         match conn {
             Some(connection) => {
                 // Use the provided connection
-                self.execute_update(connection).await
+                self.execute(connection).await
             }
             None => {
                 // Get tracker and use its get_connection method
@@ -196,7 +205,7 @@ impl AccountBuilder {
                 })?;
 
                 // Execute the update
-                let result = self.execute_update(&mut owned_conn).await;
+                let result = self.execute(&mut owned_conn).await;
 
                 // Return connection to tracker
                 tracker.return_connection(owned_conn);
@@ -207,7 +216,7 @@ impl AccountBuilder {
     }
 
     /// Helper function to execute the actual update
-    async fn execute_update(self, conn: &mut PoolConnection<Postgres>) -> Result<(), ServiceError> {
+    async fn execute(self, conn: &mut PoolConnection<Postgres>) -> Result<(), ServiceError> {
         // TODO: Implement your update logic here
         // Example:
         // sqlx::query!(

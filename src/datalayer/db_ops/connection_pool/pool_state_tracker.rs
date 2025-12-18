@@ -202,12 +202,12 @@ impl PoolStateTracker {
     /// Note: This will drop all connections, returning them to the pool
     pub fn clear(&mut self) {
         info!("Clearing {} tracked connections", self.connection_count());
-        self.current_connections.clear();
+        self.current_connections.lock().unwrap().clear();
     }
 
     /// Returns true if the tracker has no connections
     pub fn is_empty(&self) -> bool {
-        self.current_connections.is_empty()
+        self.current_connections.lock().unwrap().is_empty()
     }
 
     /// Returns the maximum allowed connections from config
