@@ -88,6 +88,8 @@ pub struct FluentSelect {
     table: Option<Alias>,
     columns: Vec<Alias>,
     filters: Vec<(Alias, Value)>,
+    conditions: Vec<sea_query::SimpleExpr>, // Generic WHERE conditions
+    joins: Vec<(Alias, sea_query::SimpleExpr)>, // (Table, ON Condition)
     limit: Option<u64>,
     offset: Option<u64>,
     order_by: Option<(Alias, Order)>,
@@ -99,6 +101,8 @@ impl FluentSelect {
             table: Some(Alias::new(table.to_string())),
             columns: vec![],
             filters: vec![],
+            conditions: vec![],
+            joins: vec![],
             limit: None,
             offset: None,
             order_by: None,
@@ -115,6 +119,17 @@ impl FluentSelect {
         if !is_value_none(&val) {
             self.filters.push((Alias::new(col.to_string()), val));
         }
+        self
+    }
+
+    pub fn and_where<E: Into<sea_query::SimpleExpr>>(mut self, cond: E) -> Self {
+        self.conditions.push(cond.into());
+        self
+    }
+
+    pub fn join<T: Iden, E: Into<sea_query::SimpleExpr>>(mut self, table: T, condition: E) -> Self {
+        self.joins
+            .push((Alias::new(table.to_string()), condition.into()));
         self
     }
 
@@ -141,8 +156,16 @@ impl FluentSelect {
             query.column(Alias::new("*"));
         }
 
+        for (table, condition) in self.joins {
+            query.left_join(table, condition);
+        }
+
         for (col, val) in self.filters {
             query.and_where(Expr::col(col).eq(val));
+        }
+
+        for cond in self.conditions {
+            query.and_where(cond);
         }
 
         if let Some(l) = self.limit {
@@ -160,7 +183,6 @@ impl FluentSelect {
         query.build(PostgresQueryBuilder)
     }
 }
-
 // --- UPDATE ---
 
 pub struct FluentUpdate {
@@ -337,6 +359,61 @@ mod tests {
         assert!(sql.contains("WHERE \"business_name\" = $1"));
         // LIMIT is parameterized as $2
         assert!(sql.contains("ORDER BY \"created_at\" DESC LIMIT $2"));
+    }
+
+    #[test]
+    fn test_fluent_select_join() {
+        use crate::datalayer::CRUD::types::{Accounts, Transactions};
+        // SELECT * FROM transactions LEFT JOIN accounts ON transactions.from_account_id = accounts.id
+        // We must use Expr::col((Table, Column)) to get "table"."column" output
+        let (sql, _) = FluentSelect::from(Transactions::Table)
+            .join(
+                Accounts::Table,
+                Expr::col((Transactions::Table, Transactions::FromAccountId))
+                    .equals((Accounts::Table, Accounts::Id)),
+            )
+            .filter(Accounts::BusinessName, "Sender Corp")
+            .render();
+
+        println!("Join SQL: {}", sql);
+        // SeaQuery 0.30 should render fully qualified identifiers if tuple provided
+        assert!(sql.contains(
+            "LEFT JOIN \"accounts\" ON \"transactions\".\"from_account_id\" = \"accounts\".\"id\""
+        ));
+    }
+
+    #[test]
+    fn test_complex_query_builder() {
+        use crate::datalayer::CRUD::types::{Accounts, Transactions};
+        // Complex Query:
+        // SELECT * FROM transactions
+        // LEFT JOIN accounts ON transactions.from_account_id = accounts.id
+        // WHERE business_name = 'Sender Corp'
+        // AND amount > 500
+        // ORDER BY created_at DESC
+        // LIMIT 10
+
+        let (sql, _) = FluentSelect::from(Transactions::Table)
+            .join(
+                Accounts::Table,
+                Expr::col((Transactions::Table, Transactions::FromAccountId))
+                    .equals((Accounts::Table, Accounts::Id)),
+            )
+            .filter(Accounts::BusinessName, "Sender Corp")
+            .and_where(Expr::col(Transactions::Amount).gt(500))
+            .order_by(Transactions::CreatedAt, Order::Desc)
+            .limit(10)
+            .render();
+
+        println!("Complex SQL: {}", sql);
+
+        assert!(sql.contains(
+            "LEFT JOIN \"accounts\" ON \"transactions\".\"from_account_id\" = \"accounts\".\"id\""
+        ));
+        assert!(sql.contains("WHERE \"business_name\" = $1"));
+        // Amount > 500 should be parameterized as $2
+        assert!(sql.contains("AND \"amount\" > $2"));
+        assert!(sql.contains("ORDER BY \"created_at\" DESC LIMIT $3"));
     }
 
     #[test]
