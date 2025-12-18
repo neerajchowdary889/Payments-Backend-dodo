@@ -1,4 +1,4 @@
-use payments_backend_dodo::datalayer::CRUD::account_db::AccountBuilder;
+use payments_backend_dodo::datalayer::CRUD::accounts::AccountBuilder;
 use payments_backend_dodo::datalayer::db_ops::db_ops::initialize_database;
 use payments_backend_dodo::errors::errors::ServiceError;
 

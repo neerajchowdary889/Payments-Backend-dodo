@@ -91,7 +91,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'reversed')),
     
     -- Idempotency support
-    idempotency_key VARCHAR(255) UNIQUE,
+    idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+
+    -- Parent transaction key
+    parent_tx_key VARCHAR(255) NOT NULL,
     
     -- Description and metadata
     description TEXT,

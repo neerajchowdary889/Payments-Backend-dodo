@@ -36,18 +36,26 @@ pub enum Accounts {
 pub enum Transactions {
     Table,
     Id,
+    #[iden = "transaction_type"]
     TransactionType,
+    #[iden = "from_account_id"]
     FromAccountId,
+    #[iden = "to_account_id"]
     ToAccountId,
     Amount,
     Currency,
     Status,
+    #[iden = "idempotency_key"]
     IdempotencyKey,
     Description,
     Metadata,
+    #[iden = "error_code"]
     ErrorCode,
+    #[iden = "error_message"]
     ErrorMessage,
+    #[iden = "created_at"]
     CreatedAt,
+    #[iden = "completed_at"]
     CompletedAt,
 }
 
