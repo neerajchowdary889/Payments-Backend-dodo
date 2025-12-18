@@ -1,5 +1,4 @@
 use super::types::Account;
-use super::helper::conversion;
 use crate::datalayer::CRUD::helper;
 use crate::datalayer::CRUD::sql_generator::sql_generator::{
     FluentInsert, FluentSelect, FluentUpdate,
@@ -7,10 +6,9 @@ use crate::datalayer::CRUD::sql_generator::sql_generator::{
 use crate::datalayer::CRUD::types::Accounts;
 use crate::datalayer::db_ops::constants::POOL_STATE_TRACKER;
 use crate::errors::errors::ServiceError;
-use sea_query::Value;
+use sea_query::{Cond, Expr, PostgresQueryBuilder, Query, Value};
+use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
-use sqlx::{PgPool, Postgres};
-use std::sync::Arc;
 use uuid::Uuid;
 
 /// Builder for creating new accounts
@@ -31,6 +29,8 @@ pub struct AccountBuilder {
     get_status: Option<bool>,
     get_metadata: Option<bool>,
     get_id: Option<bool>,
+    get_created_at: Option<bool>,
+    get_updated_at: Option<bool>,
 }
 
 impl Default for AccountBuilder {
@@ -50,6 +50,8 @@ impl Default for AccountBuilder {
             get_status: None,
             get_metadata: None,
             get_id: None,
+            get_created_at: None,
+            get_updated_at: None,
         }
     }
 }
@@ -129,6 +131,16 @@ impl AccountBuilder {
         self
     }
 
+    pub fn expect_created_at(mut self) -> Self {
+        self.get_created_at = Some(true);
+        self
+    }
+
+    pub fn expect_updated_at(mut self) -> Self {
+        self.get_updated_at = Some(true);
+        self
+    }
+
     /// Create a new account in the database
     pub async fn create(
         self,
@@ -157,7 +169,9 @@ impl AccountBuilder {
 
         // Validate balance is non-negative
         if balance != Some(0) {
-            return Err(ServiceError::InsufficientPermissions("Balance must be 0".to_string()));
+            return Err(ServiceError::InsufficientPermissions(
+                "Balance must be 0".to_string(),
+            ));
         }
 
         // Capture flags for returning
@@ -168,6 +182,17 @@ impl AccountBuilder {
         let get_balance = self.get_balance.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
         let get_metadata = self.get_metadata.unwrap_or(false);
+        // Default timestamps to true because Account struct needs them?
+        // Or should we mandate explicit expect?
+        // If we want create() -> Result<Account>, we usually need all fields.
+        // Let's default them to true if not specified, similar to ID? No, ID defaults true via unwrap_or(true).
+        // Account struct requires them. So we should probably default true for create/update/read
+        // if the target is Account struct.
+        // But for flexible query we might not want them.
+        // However, since the function returns Result<Account>, we MUST have them.
+        // So for `create`, we should default them to true.
+        let get_created_at = self.get_created_at.unwrap_or(true);
+        let get_updated_at = self.get_updated_at.unwrap_or(true);
 
         // Build the query variables
         let build_insert = || {
@@ -202,6 +227,12 @@ impl AccountBuilder {
             if get_metadata {
                 insert = insert.returning(Accounts::Metadata);
             }
+            if get_created_at {
+                insert = insert.returning(Accounts::CreatedAt);
+            }
+            if get_updated_at {
+                insert = insert.returning(Accounts::UpdatedAt);
+            }
 
             insert.render()
         };
@@ -217,34 +248,51 @@ impl AccountBuilder {
             _ => ServiceError::DatabaseError(e.to_string()),
         };
 
-        match conn {
-            Some(conn) => {
-                let (sql, values) = build_insert();
-                let query = sqlx::query_as::<_, Account>(&sql);
-                let query = bind_query_as(query, values);
-
-                query.fetch_one(&mut **conn).await.map_err(handle_error)
-            }
+        let mut owned_conn = None;
+        let db_conn = match conn {
+            Some(c) => &mut **c,
             None => {
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
+                let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-
-                let (sql, values) = build_insert();
-                let query = sqlx::query_as::<_, Account>(&sql);
-                let query = bind_query_as(query, values);
-
-                let result = query
-                    .fetch_one(&mut *owned_conn)
-                    .await
-                    .map_err(handle_error);
-                tracker.return_connection(owned_conn);
-                result
+                owned_conn = Some(c);
+                &mut **owned_conn.as_mut().unwrap()
             }
+        };
+
+        if Self::check_exists(&business_name, &email, db_conn)
+            .await
+            .unwrap_or(false)
+        {
+            if let Some(c) = owned_conn {
+                let tracker = POOL_STATE_TRACKER
+                    .get()
+                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+                tracker.return_connection(c);
+            }
+            return Err(ServiceError::AccountAlreadyExists(format!(
+                "email:{} or business name:{} already exists",
+                email, business_name
+            )));
         }
+
+        let (sql, values) = build_insert();
+        let query = sqlx::query_as::<_, Account>(&sql);
+        let query = bind_query_as(query, values);
+
+        let result = query.fetch_one(db_conn).await.map_err(handle_error);
+
+        if let Some(c) = owned_conn {
+            let tracker = POOL_STATE_TRACKER
+                .get()
+                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+            tracker.return_connection(c);
+        }
+
+        result
     }
 
     /// Update an existing account in the database
@@ -291,6 +339,8 @@ impl AccountBuilder {
         let get_balance = self.get_balance.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
         let get_metadata = self.get_metadata.unwrap_or(false);
+        let get_created_at = self.get_created_at.unwrap_or(false);
+        let get_updated_at = self.get_updated_at.unwrap_or(false);
 
         let build_update = || {
             let mut update = FluentUpdate::table(Accounts::Table)
@@ -324,41 +374,48 @@ impl AccountBuilder {
             if get_metadata {
                 update = update.returning(Accounts::Metadata);
             }
+            if get_created_at {
+                update = update.returning(Accounts::CreatedAt);
+            }
+            if get_updated_at {
+                update = update.returning(Accounts::UpdatedAt);
+            }
 
             update.render()
         };
 
-        match conn {
-            Some(conn) => {
-                let (sql, values) = build_update();
-                let query = sqlx::query_as::<_, Account>(&sql);
-                let query = bind_query_as(query, values);
-
-                query
-                    .fetch_one(&mut **conn)
-                    .await
-                    .map_err(|e| ServiceError::DatabaseError(e.to_string()))
-            }
+        let mut owned_conn = None;
+        let db_conn = match conn {
+            Some(c) => &mut **c,
             None => {
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
+                let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-
-                let (sql, values) = build_update();
-                let query = sqlx::query_as::<_, Account>(&sql);
-                let query = bind_query_as(query, values);
-
-                let result = query
-                    .fetch_one(&mut *owned_conn)
-                    .await
-                    .map_err(|e| ServiceError::DatabaseError(e.to_string()));
-                tracker.return_connection(owned_conn);
-                result
+                owned_conn = Some(c);
+                &mut **owned_conn.as_mut().unwrap()
             }
+        };
+
+        let (sql, values) = build_update();
+        let query = sqlx::query_as::<_, Account>(&sql);
+        let query = bind_query_as(query, values);
+
+        let result = query
+            .fetch_one(db_conn)
+            .await
+            .map_err(|e| ServiceError::DatabaseError(e.to_string()));
+
+        if let Some(c) = owned_conn {
+            let tracker = POOL_STATE_TRACKER
+                .get()
+                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+            tracker.return_connection(c);
         }
+
+        result
     }
 
     /// Read an account from the database based on set fields (filters)
@@ -380,6 +437,8 @@ impl AccountBuilder {
         let get_balance = self.get_balance.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
         let get_metadata = self.get_metadata.unwrap_or(false);
+        let get_created_at = self.get_created_at.unwrap_or(true);
+        let get_updated_at = self.get_updated_at.unwrap_or(true);
 
         let build_select = || {
             let mut select = FluentSelect::from(Accounts::Table);
@@ -405,6 +464,12 @@ impl AccountBuilder {
             }
             if get_metadata {
                 select = select.column(Accounts::Metadata);
+            }
+            if get_created_at {
+                select = select.column(Accounts::CreatedAt);
+            }
+            if get_updated_at {
+                select = select.column(Accounts::UpdatedAt);
             }
 
             // Add Filters
@@ -435,43 +500,67 @@ impl AccountBuilder {
             select.render()
         };
 
-        match conn {
-            Some(conn) => {
-                let (sql, values) = build_select();
-                let query = sqlx::query_as::<_, Account>(&sql);
-                let query = bind_query_as(query, values);
-
-                query.fetch_one(&mut **conn).await.map_err(|e| match e {
-                    sqlx::Error::RowNotFound => {
-                        ServiceError::AccountNotFound("Filtered criteria".to_string())
-                    }
-                    _ => ServiceError::DatabaseError(e.to_string()),
-                })
-            }
+        let mut owned_conn = None;
+        let db_conn = match conn {
+            Some(c) => &mut **c,
             None => {
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
+                let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-
-                let (sql, values) = build_select();
-                let query = sqlx::query_as::<_, Account>(&sql);
-                let query = bind_query_as(query, values);
-
-                let result = query
-                    .fetch_one(&mut *owned_conn)
-                    .await
-                    .map_err(|e| match e {
-                        sqlx::Error::RowNotFound => {
-                            ServiceError::AccountNotFound("Filtered criteria".to_string())
-                        }
-                        _ => ServiceError::DatabaseError(e.to_string()),
-                    });
-                tracker.return_connection(owned_conn);
-                result
+                owned_conn = Some(c);
+                &mut **owned_conn.as_mut().unwrap()
             }
+        };
+
+        let (sql, values) = build_select();
+        let query = sqlx::query_as::<_, Account>(&sql);
+        let query = bind_query_as(query, values);
+
+        let result = query.fetch_one(db_conn).await.map_err(|e| match e {
+            sqlx::Error::RowNotFound => {
+                ServiceError::AccountNotFound("Filtered criteria".to_string())
+            }
+            _ => ServiceError::DatabaseError(e.to_string()),
+        });
+
+        if let Some(c) = owned_conn {
+            let tracker = POOL_STATE_TRACKER
+                .get()
+                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+            tracker.return_connection(c);
+        }
+
+        result
+    }
+
+    /// Check if an account exists with the given business name OR email
+    pub async fn check_exists(
+        business_name: &str,
+        email: &str,
+        conn: &mut sqlx::PgConnection,
+    ) -> Result<bool, ServiceError> {
+        let (sql, values) = Query::select()
+            .column(Accounts::Id)
+            .from(Accounts::Table)
+            .cond_where(
+                Cond::any()
+                    .add(Expr::col(Accounts::BusinessName).eq(business_name))
+                    .add(Expr::col(Accounts::Email).eq(email)),
+            )
+            .build(PostgresQueryBuilder);
+
+        let query = sqlx::query_scalar::<_, Uuid>(&sql);
+        let query = bind_query_scalar(query, values);
+
+        let result = query.fetch_optional(conn).await;
+
+        match result {
+            Ok(Some(_)) => Ok(true),
+            Ok(None) => Ok(false),
+            Err(e) => Err(ServiceError::DatabaseError(e.to_string())),
         }
     }
 }
@@ -511,7 +600,10 @@ macro_rules! impl_bind_values {
     };
 }
 
-fn ifAccountExist()
+impl_bind_values!(
+    bind_query_scalar,
+    sqlx::query::QueryScalar<'a, Postgres, Uuid, sqlx::postgres::PgArguments>
+);
 
 impl_bind_values!(
     bind_query_as,

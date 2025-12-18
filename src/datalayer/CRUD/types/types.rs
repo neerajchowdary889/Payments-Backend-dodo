@@ -19,13 +19,16 @@ pub mod db_tables {
 pub enum Accounts {
     Table,
     Id,
+    #[iden = "business_name"]
     BusinessName,
     Email,
     Balance,
     Currency,
     Status,
     Metadata,
+    #[iden = "created_at"]
     CreatedAt,
+    #[iden = "updated_at"]
     UpdatedAt,
 }
 
@@ -65,21 +68,6 @@ pub enum Webhooks {
     UpdatedAt,
 }
 
-/// Account struct matching the accounts table schema
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Account {
-    pub id: Uuid,
-    pub business_name: String,
-    pub email: String,
-    pub balance: i64,
-    pub currency: String,
-    pub status: String,
-    #[sqlx(default)]
-    pub metadata: Option<serde_json::Value>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Currency {
     USD,
@@ -96,6 +84,21 @@ pub enum Currency {
     KRW,
     JPY, // Asia
     AUD, // Oceania
+}
+
+/// Account struct matching the accounts table schema
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Account {
+    pub id: Uuid,
+    pub business_name: String,
+    pub email: String,
+    pub balance: i64,
+    pub currency: String,
+    pub status: String,
+    #[sqlx(default)]
+    pub metadata: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 // --- API KEYS ---

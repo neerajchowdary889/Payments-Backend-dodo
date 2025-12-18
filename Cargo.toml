@@ -53,3 +53,7 @@ mockall = "0.12"
 
 [features]
 default = ["sqlx"]
+
+[[test]]
+name = "account_test"
+path = "Tests/crud/account_test.rs"

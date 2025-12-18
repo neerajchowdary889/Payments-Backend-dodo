@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS rate_limit_counters (
 
 -- Accounts indexes
 CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
+CREATE INDEX IF NOT EXISTS idx_accounts_business_name ON accounts(business_name);
 
 -- API Keys indexes
 CREATE INDEX IF NOT EXISTS idx_api_keys_account_id ON api_keys(account_id);
