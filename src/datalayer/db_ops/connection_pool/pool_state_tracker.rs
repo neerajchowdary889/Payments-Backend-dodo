@@ -3,6 +3,7 @@ use crate::datalayer::db_ops::constants::types::{DbConfig, PoolStateTracker};
 use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::PgPoolOptions;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::{error, info, instrument};
 
@@ -42,7 +43,7 @@ impl PoolStateTracker {
             })?;
 
         let mut tracker = Self {
-            current_connections: Vec::new(),
+            current_connections: Mutex::new(Vec::new()),
             available_connections: AtomicU32::new(db_config.max_connections.clone()),
             db_config: db_config,
             pool: std::sync::Arc::new(pool),
@@ -91,7 +92,7 @@ impl PoolStateTracker {
     /// Eager loads only the minimum required connections (min_connections)
     /// Remaining connections are loaded lazily on-demand
     #[instrument(fields(service = "PoolStateTracker"))]
-    pub async fn eager_load(&mut self) -> Result<(), sqlx::Error> {
+    pub async fn eager_load(&self) -> Result<(), sqlx::Error> {
         info!(
             "Eager loading {} core connections (min_connections)...",
             self.db_config.min_connections
@@ -126,7 +127,7 @@ impl PoolStateTracker {
     /// Returns cached connection if available, otherwise acquires from pool
     /// Atomically decrements the available connection count
     #[instrument(fields(service = "PoolStateTracker"))]
-    pub async fn get_connection(&mut self) -> Result<PoolConnection<Postgres>, sqlx::Error> {
+    pub async fn get_connection(&self) -> Result<PoolConnection<Postgres>, sqlx::Error> {
         // First, try to use cached connection
         if let Some(conn) = self.remove_connection() {
             info!("Reusing cached connection");
@@ -158,7 +159,7 @@ impl PoolStateTracker {
     /// Cache only holds min_connections (core/hot connections)
     /// Lazy-loaded connections are dropped when returned
     #[instrument(fields(service = "PoolStateTracker"))]
-    pub fn return_connection(&mut self, conn: PoolConnection<Postgres>) {
+    pub fn return_connection(&self, conn: PoolConnection<Postgres>) {
         // Increment available connections atomically
         let prev = self.available_connections.fetch_add(1, Ordering::SeqCst);
         info!("Available connections: {} -> {}", prev, prev + 1);
@@ -180,7 +181,7 @@ impl PoolStateTracker {
 
     /// Returns the current number of tracked connections
     fn connection_count(&self) -> usize {
-        self.current_connections.len()
+        self.current_connections.lock().unwrap().len()
     }
 
     /// Returns the current number of available connections (atomic read)
@@ -188,13 +189,13 @@ impl PoolStateTracker {
         self.available_connections.load(Ordering::SeqCst)
     }
     /// Adds a connection to track
-    pub fn add_connection(&mut self, conn: PoolConnection<Postgres>) {
-        self.current_connections.push(conn);
+    pub fn add_connection(&self, conn: PoolConnection<Postgres>) {
+        self.current_connections.lock().unwrap().push(conn);
     }
 
     /// Removes and returns a connection if available
-    pub fn remove_connection(&mut self) -> Option<PoolConnection<Postgres>> {
-        self.current_connections.pop()
+    pub fn remove_connection(&self) -> Option<PoolConnection<Postgres>> {
+        self.current_connections.lock().unwrap().pop()
     }
 
     /// Clears all tracked connections

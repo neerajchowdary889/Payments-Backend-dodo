@@ -1,10 +1,11 @@
 use super::types::Account;
+use crate::datalayer::CRUD::helper;
 use crate::datalayer::db_ops::constants::POOL_STATE_TRACKER;
 use crate::errors::errors::ServiceError;
-use sqlx::PgPool;
+use sqlx::pool::PoolConnection;
+use sqlx::{PgPool, Postgres};
 use std::sync::Arc;
 use uuid::Uuid;
-use crate::datalayer::CRUD::helper;
 /// Builder for creating new accounts
 #[derive(Debug, Default)]
 pub struct AccountBuilder {
@@ -52,9 +53,11 @@ impl AccountBuilder {
     }
 
     /// Write the account to the database
-    /// If pool is None, uses the global singleton pool
-    /// Atomic operation either commit or reject all changes
-    pub async fn write_to_db(self, pool: Option<&Arc<PgPool>>) -> Result<Uuid, ServiceError> {
+    /// If connection is None, gets a connection from the global singleton pool
+    pub async fn write_to_db(
+        self,
+        conn: Option<&mut PoolConnection<Postgres>>,
+    ) -> Result<Uuid, ServiceError> {
         // Validate required fields
         let business_name = self
             .business_name
@@ -63,7 +66,7 @@ impl AccountBuilder {
             .email
             .ok_or_else(|| ServiceError::MissingRequiredField("email".to_string()))?;
 
-        // Validate email format (basic check)
+        // Validate email format
         if !helper::email_regex::is_valid_email(&email) {
             return Err(ServiceError::ValidationError(
                 "Invalid email format".to_string(),
@@ -71,28 +74,62 @@ impl AccountBuilder {
         }
 
         // Use defaults for optional fields
-        let currency = self.currency.unwrap_or_else(|| "USD".to_string());
+        let currency = self.currency.clone().unwrap_or_else(|| "USD".to_string());
         let balance = self.balance.unwrap_or(0);
-        let status = self.status.unwrap_or_else(|| "active".to_string());
+        let status = self.status.clone().unwrap_or_else(|| "active".to_string());
 
         // Validate balance is non-negative
         if balance < 0 {
             return Err(ServiceError::InvalidTransactionAmount);
         }
 
-        // Get pool reference
-        let pool = match pool {
-            Some(p) => p,
-            None => {
-                &POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?
-                    .pool
+        // Execute with provided or acquired connection
+        match conn {
+            Some(connection) => {
+                self.execute_insert(connection, business_name, email, currency, balance, status)
+                    .await
             }
-        };
+            None => {
+                // Get tracker and use its get_connection method
+                let tracker = POOL_STATE_TRACKER
+                    .get()
+                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
 
-        // Use sqlx::query_as for better type safety
-        // This approach is cleaner and more maintainable than query!
+                // Get connection using tracker's smart connection management
+                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
+                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
+                })?;
+
+                // Execute the insert
+                let result = self
+                    .execute_insert(
+                        &mut owned_conn,
+                        business_name,
+                        email,
+                        currency,
+                        balance,
+                        status,
+                    )
+                    .await;
+
+                // Return connection to tracker
+                tracker.return_connection(owned_conn);
+
+                result
+            }
+        }
+    }
+
+    /// Helper function to execute the actual insert
+    async fn execute_insert(
+        self,
+        conn: &mut PoolConnection<Postgres>,
+        business_name: String,
+        email: String,
+        currency: String,
+        balance: i64,
+        status: String,
+    ) -> Result<Uuid, ServiceError> {
         let account_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             INSERT INTO accounts (
@@ -115,7 +152,7 @@ impl AccountBuilder {
         .bind(balance)
         .bind(&status)
         .bind(&self.metadata)
-        .fetch_one(pool.as_ref())
+        .execute(conn)
         .await
         .map_err(|e| {
             // Better error handling - check for specific errors
@@ -133,6 +170,57 @@ impl AccountBuilder {
         })?;
 
         Ok(account_id)
+    }
+
+    /// Update account in the database
+    /// If connection is None, gets a connection from the global singleton pool
+    pub async fn update(
+        self,
+        conn: Option<&mut PoolConnection<Postgres>>,
+    ) -> Result<(), ServiceError> {
+        // If connection is provided, use it; otherwise get one from pool
+        match conn {
+            Some(connection) => {
+                // Use the provided connection
+                self.execute_update(connection).await
+            }
+            None => {
+                // Get tracker and use its get_connection method
+                let tracker = POOL_STATE_TRACKER
+                    .get()
+                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+
+                // Get connection using tracker's smart connection management
+                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
+                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
+                })?;
+
+                // Execute the update
+                let result = self.execute_update(&mut owned_conn).await;
+
+                // Return connection to tracker
+                tracker.return_connection(owned_conn);
+
+                result
+            }
+        }
+    }
+
+    /// Helper function to execute the actual update
+    async fn execute_update(self, conn: &mut PoolConnection<Postgres>) -> Result<(), ServiceError> {
+        // TODO: Implement your update logic here
+        // Example:
+        // sqlx::query!(
+        //     "UPDATE accounts SET business_name = $1, email = $2, updated_at = NOW() WHERE id = $3",
+        //     self.business_name,
+        //     self.email,
+        //     self.id
+        // )
+        // .execute(conn)
+        // .await
+        // .map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        Ok(())
     }
 }
 

@@ -1,7 +1,7 @@
 use sqlx::pool::PoolConnection;
 use sqlx::{PgPool, Postgres};
-use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Database configuration structure
@@ -24,7 +24,8 @@ pub struct DbConfig {
 /// increments when they are returned. This is atomic for thread-safety.
 pub struct PoolStateTracker {
     pub db_config: DbConfig,
-    pub current_connections: Vec<PoolConnection<Postgres>>,
+    /// Wrapped in Mutex for interior mutability (allows &self methods to modify)
+    pub current_connections: Mutex<Vec<PoolConnection<Postgres>>>,
     /// Atomic counter tracking available connections (starts at max_connections)
     pub available_connections: AtomicU32,
     pub pool: Arc<PgPool>,
@@ -34,7 +35,10 @@ impl std::fmt::Debug for PoolStateTracker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PoolStateTracker")
             .field("db_config", &self.db_config)
-            .field("connection_count", &self.current_connections.len())
+            .field(
+                "connection_count",
+                &self.current_connections.lock().unwrap().len(),
+            )
             .field(
                 "available_connections",
                 &self
