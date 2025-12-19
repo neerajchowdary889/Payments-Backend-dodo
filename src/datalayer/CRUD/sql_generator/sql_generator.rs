@@ -435,19 +435,19 @@ mod tests {
 
     #[test]
     fn test_fluent_delete_wrapper() {
-        use crate::datalayer::CRUD::types::Accounts;
-        let (sql, values) = FluentDelete::from(Accounts::Table)
-            .filter(Accounts::Email, "fluent@example.com")
-            .filter(Accounts::BusinessName, "Fluent Corp")
-            .filter(Accounts::CreatedAt, Option::<String>::None)
-            .returning(Accounts::Id)
+        use crate::datalayer::CRUD::types::Transactions;
+        let (sql, values) = FluentDelete::from(Transactions::Table)
+            .filter(Transactions::IdempotencyKey, "test-idempotency-key")
+            .filter(Transactions::ParentTxKey, "test-parent-key")
+            .filter(Transactions::CreatedAt, Option::<String>::None)
+            .returning(Transactions::Id)
             .render();
 
         println!("Delete SQL: {}", sql);
         println!("Delete Values: {:?}", values);
 
-        assert!(sql.starts_with("DELETE FROM \"accounts\""));
-        assert!(sql.contains("WHERE \"email\" = $1"));
+        assert!(sql.starts_with("DELETE FROM \"transactions\""));
+        assert!(sql.contains("WHERE \"idempotency_key\" = $1"));
         assert!(sql.contains("RETURNING \"id\""));
     }
 }

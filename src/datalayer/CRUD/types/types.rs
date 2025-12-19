@@ -47,6 +47,8 @@ pub enum Transactions {
     Status,
     #[iden = "idempotency_key"]
     IdempotencyKey,
+    #[iden = "parent_tx_key"]
+    ParentTxKey,
     Description,
     Metadata,
     #[iden = "error_code"]
@@ -156,7 +158,8 @@ pub struct Transaction {
     pub amount: i64,
     pub currency: String,
     pub status: TransactionStatus,
-    pub idempotency_key: Option<String>,
+    pub idempotency_key: String,
+    pub parent_tx_key: String,
     pub description: Option<String>,
     #[sqlx(default)]
     pub metadata: Option<serde_json::Value>,

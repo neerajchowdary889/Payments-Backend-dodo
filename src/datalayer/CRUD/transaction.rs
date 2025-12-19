@@ -23,6 +23,7 @@ pub struct TransactionBuilder {
     currency: Option<String>,
     status: Option<TransactionStatus>,
     idempotency_key: Option<String>,
+    parent_tx_key: Option<String>,
     description: Option<String>,
     metadata: Option<serde_json::Value>,
     error_code: Option<String>,
@@ -38,6 +39,7 @@ pub struct TransactionBuilder {
     get_currency: Option<bool>,
     get_status: Option<bool>,
     get_idempotency_key: Option<bool>,
+    get_parent_tx_key: Option<bool>,
     get_description: Option<bool>,
     get_metadata: Option<bool>,
     get_error_code: Option<bool>,
@@ -89,6 +91,11 @@ impl TransactionBuilder {
 
     pub fn idempotency_key(mut self, idempotency_key: String) -> Self {
         self.idempotency_key = Some(idempotency_key);
+        self
+    }
+
+    pub fn parent_tx_key(mut self, parent_tx_key: String) -> Self {
+        self.parent_tx_key = Some(parent_tx_key);
         self
     }
 
@@ -158,6 +165,11 @@ impl TransactionBuilder {
         self
     }
 
+    pub fn expect_parent_tx_key(mut self) -> Self {
+        self.get_parent_tx_key = Some(true);
+        self
+    }
+
     pub fn expect_description(mut self) -> Self {
         self.get_description = Some(true);
         self
@@ -200,33 +212,38 @@ impl TransactionBuilder {
         let amount = self.amount.as_ref().ok_or_else(|| {
             ServiceError::ValidationError("Missing amount for create".to_string())
         })?;
+        let idempotency_key = self.idempotency_key.as_ref().ok_or_else(|| {
+            ServiceError::ValidationError("Missing idempotency_key for create".to_string())
+        })?;
+        let parent_tx_key = self.parent_tx_key.as_ref().ok_or_else(|| {
+            ServiceError::ValidationError("Missing parent_tx_key for create".to_string())
+        })?;
 
         // Validate transaction type constraints
         self.validate_transaction_accounts(&transaction_type)?;
 
         // Check idempotency if key is provided
-        if let Some(ref key) = self.idempotency_key {
-            let exists = match conn.as_mut() {
-                Some(c) => Self::check_idempotency_exists(key, &mut ***c).await?,
-                None => {
-                    let tracker = POOL_STATE_TRACKER
-                        .get()
-                        .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                    let mut owned_conn = tracker.get_connection().await.map_err(|e| {
-                        ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
-                    })?;
-                    let result = Self::check_idempotency_exists(key, &mut *owned_conn).await?;
-                    tracker.return_connection(owned_conn);
-                    result
-                }
-            };
-
-            if exists {
-                return Err(ServiceError::DuplicateTransaction(format!(
-                    "Transaction with idempotency_key '{}' already exists",
-                    key
-                )));
+        let exists = match conn.as_mut() {
+            Some(c) => Self::check_idempotency_exists(idempotency_key, &mut ***c).await?,
+            None => {
+                let tracker = POOL_STATE_TRACKER
+                    .get()
+                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
+                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
+                })?;
+                let result =
+                    Self::check_idempotency_exists(idempotency_key, &mut *owned_conn).await?;
+                tracker.return_connection(owned_conn);
+                result
             }
+        };
+
+        if exists {
+            return Err(ServiceError::DuplicateTransaction(format!(
+                "Transaction with idempotency_key '{}' already exists",
+                idempotency_key
+            )));
         }
 
         // Determine which fields to return
@@ -238,12 +255,14 @@ impl TransactionBuilder {
         let get_currency = self.get_currency.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
         let get_idempotency_key = self.get_idempotency_key.unwrap_or(false);
+        let get_parent_tx_key = self.get_parent_tx_key.unwrap_or(false);
         let get_description = self.get_description.unwrap_or(false);
         let get_metadata = self.get_metadata.unwrap_or(false);
         let get_error_code = self.get_error_code.unwrap_or(false);
         let get_error_message = self.get_error_message.unwrap_or(false);
         let get_created_at = self.get_created_at.unwrap_or(true);
         let get_completed_at = self.get_completed_at.unwrap_or(true);
+        let get_parent_tx_key = self.get_parent_tx_key.unwrap_or(true);
 
         // Build the INSERT query
         let build_insert = || {
@@ -262,6 +281,7 @@ impl TransactionBuilder {
                 .value(Transactions::Currency, self.currency.clone())
                 .value(Transactions::Status, status_str)
                 .value(Transactions::IdempotencyKey, self.idempotency_key.clone())
+                .value(Transactions::ParentTxKey, self.parent_tx_key.clone())
                 .value(Transactions::Description, self.description.clone())
                 .value(Transactions::Metadata, self.metadata.clone())
                 .value(Transactions::ErrorCode, self.error_code.clone())
@@ -292,11 +312,17 @@ impl TransactionBuilder {
             if get_idempotency_key {
                 insert = insert.returning(Transactions::IdempotencyKey);
             }
+            if get_parent_tx_key {
+                insert = insert.returning(Transactions::ParentTxKey);
+            }
             if get_description {
                 insert = insert.returning(Transactions::Description);
             }
             if get_metadata {
                 insert = insert.returning(Transactions::Metadata);
+            }
+            if get_parent_tx_key {
+                insert = insert.returning(Transactions::ParentTxKey);
             }
             if get_error_code {
                 insert = insert.returning(Transactions::ErrorCode);
@@ -372,6 +398,7 @@ impl TransactionBuilder {
         let get_error_message = self.get_error_message.unwrap_or(false);
         let get_created_at = self.get_created_at.unwrap_or(true);
         let get_completed_at = self.get_completed_at.unwrap_or(true);
+        let get_parent_tx_key = self.get_parent_tx_key.unwrap_or(true);
 
         let build_update = || {
             // Convert enum to string for sea-query
@@ -412,6 +439,9 @@ impl TransactionBuilder {
             }
             if get_idempotency_key {
                 update = update.returning(Transactions::IdempotencyKey);
+            }
+            if get_parent_tx_key {
+                update = update.returning(Transactions::ParentTxKey);
             }
             if get_description {
                 update = update.returning(Transactions::Description);
@@ -482,6 +512,7 @@ impl TransactionBuilder {
         let get_currency = self.get_currency.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
         let get_idempotency_key = self.get_idempotency_key.unwrap_or(false);
+        let get_parent_tx_key = self.get_parent_tx_key.unwrap_or(false);
         let get_description = self.get_description.unwrap_or(false);
         let get_metadata = self.get_metadata.unwrap_or(false);
         let get_error_code = self.get_error_code.unwrap_or(false);
@@ -515,6 +546,9 @@ impl TransactionBuilder {
             }
             if get_idempotency_key {
                 select = select.column(Transactions::IdempotencyKey);
+            }
+            if get_parent_tx_key {
+                select = select.column(Transactions::ParentTxKey);
             }
             if get_description {
                 select = select.column(Transactions::Description);
@@ -555,6 +589,9 @@ impl TransactionBuilder {
             }
             if let Some(ref idempotency_key) = self.idempotency_key {
                 select = select.filter(Transactions::IdempotencyKey, idempotency_key.clone());
+            }
+            if let Some(ref parent_tx_key) = self.parent_tx_key {
+                select = select.filter(Transactions::ParentTxKey, parent_tx_key.clone());
             }
 
             select.render()
