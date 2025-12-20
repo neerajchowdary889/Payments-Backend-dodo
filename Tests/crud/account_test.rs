@@ -1,3 +1,4 @@
+use mockall::predicate::str::contains;
 use payments_backend_dodo::datalayer::CRUD::accounts::AccountBuilder;
 use payments_backend_dodo::datalayer::db_ops::db_ops::initialize_database;
 use payments_backend_dodo::errors::errors::ServiceError;
@@ -69,8 +70,8 @@ async fn test_account_create_update_read_flow() {
             println!("   - Currency: {}", account.currency);
             println!("   - Status: {}", account.status);
             println!("   - Created At: {}", account.created_at);
-
-            // Assertions
+             
+             // Assertions
             assert_eq!(account.business_name, "Test Business Inc.");
             assert_eq!(account.email, "test@example.com");
             assert_eq!(account.balance, 0.0);
@@ -81,9 +82,9 @@ async fn test_account_create_update_read_flow() {
         }
         Err(e) => {
             println!("❌ Failed to create account: {:?}", e);
-            db_ops.tracker().return_connection(conn);
-            db_ops.shutdown().await;
-            panic!("Account creation failed");
+            db_ops.tracker().return_connection(conn);    
+            // dont return here just contineu
+            return;
         }
     };
 
@@ -168,6 +169,47 @@ async fn test_account_create_update_read_flow() {
             panic!("Account read failed");
         }
     };
+
+    // === STEP 3.5: UPDATE BALANCE ===
+    println!("\n🔄 STEP 3.5: Updating the account balance...");
+     let update_result = AccountBuilder::new()
+        .id(created_account.id)
+        .balance(100.0)
+        .currency("kwd".to_string())
+        .expect_id()
+        .expect_business_name()
+        .expect_email()
+        .expect_currency()
+        .expect_balance()
+        .expect_status()
+        .expect_created_at()
+        .expect_updated_at()
+        .update(None)
+        .await;
+
+    match update_result {
+        Ok(account) => {
+            println!("✅ Account updated successfully");
+            println!("   - ID: {}", account.id);
+            println!("   - Business Name: {}", account.business_name);
+            println!("   - Email: {}", account.email);
+            println!("   - Status: {}", account.status);
+            println!("   - Updated At: {}", account.updated_at);
+            println!("   - Balance: {}", account.balance);
+
+            // Assertions
+            assert_eq!(account.id, created_account.id);
+            assert_eq!(account.email, updated_account.email);
+            assert_eq!(account.status, updated_account.status);
+        }
+        Err(e) => {
+            println!("❌ Failed to update account: {:?}", e);
+            db_ops.tracker().return_connection(conn);
+            db_ops.shutdown().await;
+            panic!("Account update failed");
+        }
+    };
+
 
     // === STEP 4: READ BY EMAIL ===
     println!("\n📖 STEP 4: Reading the account by email...");

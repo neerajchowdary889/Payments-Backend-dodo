@@ -8,6 +8,7 @@ use crate::datalayer::CRUD::types::Accounts;
 use crate::datalayer::db_ops::constants::{DEFAULT_CURRENCY, POOL_STATE_TRACKER};
 use crate::errors::errors::ServiceError;
 use sea_query::{Cond, Expr, PostgresQueryBuilder, Query, Value};
+use sqlx::FromRow;
 use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
 use uuid::Uuid;
@@ -300,10 +301,12 @@ impl AccountBuilder {
         }
 
         let (sql, values) = build_insert();
-        let query = sqlx::query_as::<_, Account>(&sql);
-        let query = bind_query_as(query, values);
+        let query = sqlx::query::<Postgres>(&sql);
+        let query = bind_query(query, values);
 
-        let result = query.fetch_one(db_conn).await.map_err(handle_error);
+        let row = query.fetch_one(db_conn).await.map_err(handle_error)?;
+        let result =
+            Account::from_row(&row).map_err(|e| ServiceError::DatabaseError(e.to_string()));
 
         result
     }
@@ -316,8 +319,8 @@ impl AccountBuilder {
     ) -> Result<Account, ServiceError> {
         // Sort out the connection issues here rather than bottom
         // This should be bottom of the function actually so save connection locking time so that when we see lot of request over period of time
-        // - we save locking time significant. 
-        // But for the quick refactor we made this in top for this funciton. 
+        // - we save locking time significant.
+        // But for the quick refactor we made this in top for this funciton.
         struct ConnectionGuard(Option<PoolConnection<Postgres>>);
         impl Drop for ConnectionGuard {
             fn drop(&mut self) {
@@ -366,10 +369,9 @@ impl AccountBuilder {
          If balance is provided, check for the currency - first convert it to USD
          - Then convert to storage units
         */
-        let mut usd_balance : i64 = 0;
+        let mut usd_balance: i64 = 0;
         let mut currency = self.currency;
         if self.balance.is_some() {
-
             /*
             If currency is not provided, then try to read the currency from the database
             - if that too not provided then use default USD
@@ -383,12 +385,15 @@ impl AccountBuilder {
 
                 if let Ok(account) = account_res {
                     currency = Some(account.currency);
-                }else{
+                } else {
                     currency = Some(DEFAULT_CURRENCY.to_string());
                 }
             }
 
-            usd_balance = money::to_storage_units_with_conversion(self.balance.unwrap(), currency.clone().unwrap())
+            usd_balance = money::to_storage_units_with_conversion(
+                self.balance.unwrap(),
+                currency.clone().unwrap(),
+            )
         }
 
         let build_update = || {
@@ -434,13 +439,15 @@ impl AccountBuilder {
         };
 
         let (sql, values) = build_update();
-        let query = sqlx::query_as::<_, Account>(&sql);
-        let query = bind_query_as(query, values);
+        let query = sqlx::query::<Postgres>(&sql);
+        let query = bind_query(query, values);
 
-        let result = query
+        let row = query
             .fetch_one(&mut **db_conn)
             .await
-            .map_err(|e| ServiceError::DatabaseError(e.to_string()));
+            .map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        let result =
+            Account::from_row(&row).map_err(|e| ServiceError::DatabaseError(e.to_string()));
 
         result
     }
@@ -527,38 +534,49 @@ impl AccountBuilder {
             select.render()
         };
 
-        let mut owned_conn = None;
+        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                if let Some(c) = self.0.take() {
+                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                        tracker.return_connection(c);
+                    }
+                }
+            }
+        }
+
+        let mut guard = ConnectionGuard(None);
         let db_conn = match conn {
-            Some(c) => &mut **c,
+            Some(c) => {
+                // Connection provided by caller - don't manage it with guard
+                &mut **c
+            }
             None => {
+                // We're acquiring the connection - manage it with guard
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
                 let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-                owned_conn = Some(c);
-                &mut **owned_conn.as_mut().unwrap()
+                guard.0 = Some(c);
+                guard.0.as_mut().unwrap()
             }
         };
 
         let (sql, values) = build_select();
-        let query = sqlx::query_as::<_, Account>(&sql);
-        let query = bind_query_as(query, values);
+        let query = sqlx::query::<Postgres>(&sql);
+        let query = bind_query(query, values);
 
-        let result = query.fetch_one(db_conn).await.map_err(|e| match e {
+        let row = query.fetch_one(db_conn).await.map_err(|e| match e {
             sqlx::Error::RowNotFound => {
                 ServiceError::AccountNotFound("Filtered criteria".to_string())
             }
             _ => ServiceError::DatabaseError(e.to_string()),
-        });
+        })?;
 
-        if let Some(c) = owned_conn {
-            let tracker = POOL_STATE_TRACKER
-                .get()
-                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-            tracker.return_connection(c);
-        }
+        let result =
+            Account::from_row(&row).map_err(|e| ServiceError::DatabaseError(e.to_string()));
 
         result
     }
@@ -635,4 +653,9 @@ impl_bind_values!(
 impl_bind_values!(
     bind_query_as,
     sqlx::query::QueryAs<'a, Postgres, Account, sqlx::postgres::PgArguments>
+);
+
+impl_bind_values!(
+    bind_query,
+    sqlx::query::Query<'a, Postgres, sqlx::postgres::PgArguments>
 );

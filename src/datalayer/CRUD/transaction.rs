@@ -237,30 +237,6 @@ impl TransactionBuilder {
         // Validate transaction type constraints
         self.validate_transaction_accounts(&transaction_type)?;
 
-        // Check idempotency if key is provided
-        let exists = match conn.as_mut() {
-            Some(c) => Self::check_idempotency_exists(idempotency_key, &mut ***c).await?,
-            None => {
-                let tracker = POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                let mut owned_conn = tracker.get_connection().await.map_err(|e| {
-                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
-                })?;
-                let result =
-                    Self::check_idempotency_exists(idempotency_key, &mut *owned_conn).await?;
-                tracker.return_connection(owned_conn);
-                result
-            }
-        };
-
-        if exists {
-            return Err(ServiceError::DuplicateTransaction(format!(
-                "Transaction with idempotency_key '{}' already exists",
-                idempotency_key
-            )));
-        }
-
         // Determine which fields to return
         let get_id = self.get_id.unwrap_or(true);
         let get_transaction_type = self.get_transaction_type.unwrap_or(false);
@@ -351,39 +327,58 @@ impl TransactionBuilder {
             insert.render()
         };
 
-        // Before quering this table, check if the parent_tx_key exists for debit and credit transactions
+        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                if let Some(c) = self.0.take() {
+                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                        tracker.return_connection(c);
+                    }
+                }
+            }
+        }
 
-        // Execute query
-        let (sql, values) = build_insert();
-        let query = sqlx::query_as::<_, Transaction>(&sql);
-        let query = bind_query_as(query, values);
-
-        let mut owned_conn = None;
-        let db_conn = match conn.as_mut() {
-            Some(c) => &mut ***c,
+        let mut guard = ConnectionGuard(None);
+        let db_conn = match conn {
+            Some(c) => {
+                // Connection provided by caller - don't manage it with guard
+                &mut **c
+            }
             None => {
+                // We're acquiring the connection - manage it with guard
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
                 let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-                owned_conn = Some(c);
-                &mut **owned_conn.as_mut().unwrap()
+                guard.0 = Some(c);
+                guard.0.as_mut().unwrap()
             }
         };
+
+        // Check idempotency if key is provided
+        let exists = Self::check_idempotency_exists(idempotency_key, &mut *db_conn).await;
+
+        if exists.is_ok() {
+            return Err(ServiceError::DuplicateTransaction(format!(
+                "Transaction with idempotency_key '{}' already exists",
+                idempotency_key
+            )));
+        }
+
+        // Before quering this table, check if the parent_tx_key exists for debit and credit transactions
+        let basic_create_check = Self::basic_create_checks(&self, &mut *db_conn).await;
+
+        // Execute query
+        let (sql, values) = build_insert();
+        let query = sqlx::query_as::<_, Transaction>(&sql);
+        let query = bind_query_as(query, values);
 
         let result = query
             .fetch_one(db_conn)
             .await
             .map_err(|e| ServiceError::DatabaseError(e.to_string()));
-
-        if let Some(c) = owned_conn {
-            let tracker = POOL_STATE_TRACKER
-                .get()
-                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-            tracker.return_connection(c);
-        }
 
         result
     }
@@ -712,7 +707,6 @@ impl TransactionBuilder {
         Ok(())
     }
 
-        
     #[allow(unused_doc_comments)]
     async fn basic_create_checks(
         &self,
@@ -805,7 +799,6 @@ impl TransactionBuilder {
 
         Ok(true)
     }
-
 }
 
 /// Helper macro to implement binding for different query types
