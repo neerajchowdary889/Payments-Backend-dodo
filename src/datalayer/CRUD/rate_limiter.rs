@@ -1,8 +1,8 @@
 use crate::datalayer::CRUD::api_key::ApiKeyBuilder;
 use crate::datalayer::db_ops::constants::POOL_STATE_TRACKER;
+use crate::datalayer::helper::backoff::ExponentialBackoff;
 use crate::errors::errors::ServiceError;
 use chrono::{DateTime, Duration, Timelike, Utc};
-use sqlx::Postgres;
 use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
@@ -82,9 +82,17 @@ impl RateLimiter {
         let api_key = ApiKeyBuilder::new()
             .id(api_key_id)
             .expect_id()
+            .expect_account_id()
+            .expect_key_hash()
+            .expect_key_prefix()
+            .expect_name()
             .expect_status()
             .expect_rate_limit_per_minute()
             .expect_rate_limit_per_hour()
+            .expect_created_at()
+            .expect_last_used_at()
+            .expect_permissions()
+            .expect_expires_at()
             .expect_revoked_at()
             .read(Some(&mut conn))
             .await?;
@@ -252,8 +260,14 @@ impl RateLimiter {
         let api_key = ApiKeyBuilder::new()
             .id(api_key_id)
             .expect_id()
+            .expect_account_id()
+            .expect_key_hash()
+            .expect_key_prefix()
+            .expect_name()
+            .expect_status()
             .expect_rate_limit_per_minute()
             .expect_rate_limit_per_hour()
+            .expect_created_at()
             .read(Some(&mut conn))
             .await?;
 
@@ -312,6 +326,200 @@ impl RateLimiter {
 
         tracker.return_connection(conn);
         Ok(results)
+    }
+
+    /// Check rate limit with automatic retry using exponential backoff
+    ///
+    /// This method automatically retries with exponential backoff if a rate limit
+    /// is exceeded, up to `max_retries` times.
+    ///
+    /// # Arguments
+    ///
+    /// * `api_key_id` - The UUID of the API key
+    /// * `api_key_prefix` - The prefix of the API key (for error messages)
+    /// * `max_retries` - Maximum number of retry attempts (default: 3)
+    /// * `base_delay_ms` - Base delay in milliseconds for exponential backoff (default: 100ms)
+    /// * `max_delay_ms` - Maximum delay cap in milliseconds (default: 5000ms)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RateLimitResult)` - If the request is allowed (either immediately or after retries)
+    /// * `Err(ServiceError)` - If rate limit is still exceeded after all retries, or other errors
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// // Use default settings (3 retries, 100ms base, 5s max)
+    /// let result = RateLimiter::check_with_retry(api_key_id, &api_key_prefix, 3, 100, 5000).await?;
+    /// ```
+    pub async fn check_with_retry(
+        api_key_id: Uuid,
+        api_key_prefix: &str,
+        max_retries: u32,
+        base_delay_ms: u64,
+        max_delay_ms: u64,
+    ) -> Result<RateLimitResult, ServiceError> {
+        let mut attempt = 0;
+
+        loop {
+            match Self::check_rate_limit(api_key_id, api_key_prefix).await {
+                Ok(results) => {
+                    // Success! Return the first result (minute or hour limit)
+                    if let Some(result) = results.into_iter().next() {
+                        return Ok(result);
+                    } else {
+                        // No rate limits configured
+                        return Err(ServiceError::ValidationError(
+                            "No rate limits configured for this API key".to_string(),
+                        ));
+                    }
+                }
+                Err(ServiceError::RateLimitExceeded {
+                    limit,
+                    window,
+                    reset_at,
+                }) => {
+                    // Rate limit exceeded
+                    if attempt >= max_retries {
+                        // Exhausted all retries, return the error
+                        return Err(ServiceError::RateLimitExceeded {
+                            limit,
+                            window,
+                            reset_at,
+                        });
+                    }
+
+                    // Create backoff calculator with configured settings
+                    let mut backoff = ExponentialBackoff::new();
+                    backoff.set_base_delay_ms(base_delay_ms);
+                    backoff.set_max_delay_ms(max_delay_ms);
+
+                    // Calculate backoff delay
+                    let backoff_ms = backoff.calculate(attempt);
+
+                    println!(
+                        "⏳ Rate limit exceeded (attempt {}), retrying in {}ms...",
+                        attempt + 1,
+                        backoff_ms
+                    );
+
+                    // Sleep for the backoff duration
+                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+
+                    attempt += 1;
+                }
+                Err(e) => {
+                    // Other error (not rate limit), return immediately
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    /// Check rate limit with retry, waiting until reset time if all retries fail
+    ///
+    /// This is a more aggressive retry strategy that will wait until the rate limit
+    /// window resets if exponential backoff retries are exhausted.
+    ///
+    /// # Arguments
+    ///
+    /// * `api_key_id` - The UUID of the API key
+    /// * `api_key_prefix` - The prefix of the API key (for error messages)
+    /// * `max_retries` - Maximum number of retry attempts before waiting for reset
+    /// * `base_delay_ms` - Base delay in milliseconds for exponential backoff
+    /// * `max_delay_ms` - Maximum delay cap in milliseconds
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(RateLimitResult)` - If the request is eventually allowed
+    /// * `Err(ServiceError)` - For non-rate-limit errors
+    ///
+    /// # Warning
+    ///
+    /// This function can block for up to 1 minute (or 1 hour for hourly limits).
+    /// Use with caution in production environments.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// // Will wait until rate limit resets if retries fail
+    /// let result = RateLimiter::check_with_wait_for_reset(
+    ///     api_key_id,
+    ///     &api_key_prefix,
+    ///     3,
+    ///     100,
+    ///     5000
+    /// ).await?;
+    /// ```
+    pub async fn check_with_wait_for_reset(
+        api_key_id: Uuid,
+        api_key_prefix: &str,
+        max_retries: u32,
+        base_delay_ms: u64,
+        max_delay_ms: u64,
+    ) -> Result<RateLimitResult, ServiceError> {
+        // First try with exponential backoff retries
+        match Self::check_with_retry(
+            api_key_id,
+            api_key_prefix,
+            max_retries,
+            base_delay_ms,
+            max_delay_ms,
+        )
+        .await
+        {
+            Ok(result) => Ok(result),
+            Err(ServiceError::RateLimitExceeded {
+                limit: _,
+                window,
+                reset_at,
+            }) => {
+                // Calculate time until reset
+                let now = Utc::now();
+                let wait_duration = reset_at.signed_duration_since(now);
+
+                if wait_duration.num_seconds() > 0 {
+                    let wait_ms = wait_duration.num_milliseconds() as u64;
+
+                    println!(
+                        "⏰ Waiting for rate limit reset ({} window) in {}ms...",
+                        window, wait_ms
+                    );
+
+                    // Wait until reset time
+                    tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
+
+                    // Try one more time after reset
+                    match Self::check_rate_limit(api_key_id, api_key_prefix).await {
+                        Ok(results) => {
+                            if let Some(result) = results.into_iter().next() {
+                                Ok(result)
+                            } else {
+                                Err(ServiceError::ValidationError(
+                                    "No rate limits configured for this API key".to_string(),
+                                ))
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    // Reset time has already passed, try immediately
+                    match Self::check_rate_limit(api_key_id, api_key_prefix).await {
+                        Ok(results) => {
+                            if let Some(result) = results.into_iter().next() {
+                                Ok(result)
+                            } else {
+                                Err(ServiceError::ValidationError(
+                                    "No rate limits configured for this API key".to_string(),
+                                ))
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 

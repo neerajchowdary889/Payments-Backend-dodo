@@ -55,10 +55,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
     name VARCHAR(100), -- Optional name for the key
     status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
     
-    -- Rate limiting
-    rate_limit_per_minute INTEGER DEFAULT 100,
-    rate_limit_per_hour INTEGER DEFAULT 1000,
-    
     -- Permissions (for future extensibility)
     permissions JSONB DEFAULT '["read", "write"]',
     
@@ -179,27 +175,6 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
     failed_at TIMESTAMP WITH TIME ZONE
 );
 
--- ============================================================================
--- RATE LIMIT TRACKING TABLE (Optional - for in-memory alternative)
--- ============================================================================
--- Tracks API request counts for rate limiting
-CREATE TABLE IF NOT EXISTS rate_limit_counters (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    api_key_id UUID NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
-    
-    -- Time window
-    window_start TIMESTAMP WITH TIME ZONE NOT NULL,
-    window_type VARCHAR(10) NOT NULL CHECK (window_type IN ('minute', 'hour')),
-    
-    -- Counter
-    request_count INTEGER NOT NULL DEFAULT 1,
-    
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Unique constraint to prevent duplicate windows
-    UNIQUE(api_key_id, window_start, window_type)
-);
 
 -- ============================================================================
 -- INDEXES FOR PERFORMANCE
@@ -235,7 +210,7 @@ CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status ON webhook_deliveries(s
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_next_retry ON webhook_deliveries(next_retry_at) WHERE status = 'pending';
 
 -- Rate limit indexes
-CREATE INDEX IF NOT EXISTS idx_rate_limit_api_key_window ON rate_limit_counters(api_key_id, window_start, window_type);
+
 
 -- ============================================================================
 -- TRIGGERS FOR AUTOMATIC TIMESTAMP UPDATES
@@ -302,7 +277,7 @@ GRANT USAGE ON SCHEMA public TO postgres;
 DO $$
 BEGIN
     RAISE NOTICE '✅ Payments database initialized successfully!';
-    RAISE NOTICE '📊 Tables created: accounts, api_keys, transactions, webhooks, webhook_deliveries, rate_limit_counters';
+    RAISE NOTICE '📊 Tables created: accounts, api_keys, transactions, webhooks, webhook_deliveries';
     RAISE NOTICE '🔍 Indexes created for optimal query performance';
     RAISE NOTICE '🧪 Sample data inserted for testing';
 END $$;
