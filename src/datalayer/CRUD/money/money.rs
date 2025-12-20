@@ -81,14 +81,14 @@ pub fn from_storage_units_with_conversion(units: i64, currency: String) -> f64 {
 /// # Validation Rules
 /// - Amount must be positive (> 0)
 /// - Amount must not exceed i64::MAX to prevent overflow
-pub fn validate_amount(amount: i64) -> Result<(), ServiceError> {
-    if amount <= 0 {
+pub fn validate_amount(amount: f64) -> Result<(), ServiceError> {
+    if amount <= 0.00 {
         return Err(ServiceError::InvalidTransactionAmount);
     }
 
     // Additional validation: ensure amount is reasonable
     // This prevents potential overflow issues in calculations
-    if amount > i64::MAX / 2 {
+    if amount > f64::MAX / 2.0 {
         return Err(ServiceError::ValidationError(
             "Amount exceeds maximum allowed value".to_string(),
         ));
@@ -138,11 +138,11 @@ mod tests {
 
     #[test]
     fn test_validate_amount() {
-        assert!(validate_amount(1).is_ok());
-        assert!(validate_amount(100000).is_ok());
-        assert!(validate_amount(0).is_err());
-        assert!(validate_amount(-1).is_err());
-        assert!(validate_amount(i64::MAX).is_err()); // Too large
+        assert!(validate_amount(1.0).is_ok());
+        assert!(validate_amount(100000.0).is_ok());
+        assert!(validate_amount(0.0).is_err());
+        assert!(validate_amount(-1.0).is_err());
+        assert!(validate_amount(f64::MAX).is_err()); // Too large
     }
 
     #[test]

@@ -651,11 +651,6 @@ impl_bind_values!(
 );
 
 impl_bind_values!(
-    bind_query_as,
-    sqlx::query::QueryAs<'a, Postgres, Account, sqlx::postgres::PgArguments>
-);
-
-impl_bind_values!(
     bind_query,
     sqlx::query::Query<'a, Postgres, sqlx::postgres::PgArguments>
 );

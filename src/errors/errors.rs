@@ -24,7 +24,7 @@ pub enum ServiceError {
     // Transaction Errors
     InsufficientBalance {
         account_id: String,
-        required: i64,
+        required: f64,
     },
     InvalidTransactionAmount,
     InvalidCurrency,

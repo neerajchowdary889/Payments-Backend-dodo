@@ -1,13 +1,16 @@
 use super::types::{Transaction, TransactionStatus, TransactionType};
 use crate::datalayer::CRUD::accounts::AccountBuilder;
+use crate::datalayer::CRUD::helper::transaction::TransactionHelper;
 use crate::datalayer::CRUD::money;
 use crate::datalayer::CRUD::sql_generator::sql_generator::{
     FluentInsert, FluentSelect, FluentUpdate,
 };
 use crate::datalayer::CRUD::types::Transactions;
-use crate::datalayer::db_ops::constants::{DENOMINATOR, POOL_STATE_TRACKER};
+use crate::datalayer::db_ops::constants::{DEFAULT_CURRENCY, DENOMINATOR, POOL_STATE_TRACKER};
 use crate::errors::errors::ServiceError;
+use chrono::Utc;
 use sea_query::Value;
+use sqlx::FromRow;
 use sqlx::Postgres;
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::PgConnection;
@@ -26,37 +29,37 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Default)]
 pub struct TransactionBuilder {
     // Transaction fields
-    id: Option<Uuid>,
-    transaction_type: Option<TransactionType>,
-    from_account_id: Option<Uuid>,
-    to_account_id: Option<Uuid>,
-    amount: Option<i64>,
-    currency: Option<String>,
-    status: Option<TransactionStatus>,
-    idempotency_key: Option<String>,
-    parent_tx_key: Option<String>,
-    description: Option<String>,
-    metadata: Option<serde_json::Value>,
-    error_code: Option<String>,
-    error_message: Option<String>,
-    completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub id: Option<Uuid>,
+    pub transaction_type: Option<TransactionType>,
+    pub from_account_id: Option<Uuid>,
+    pub to_account_id: Option<Uuid>,
+    pub amount: Option<f64>,
+    pub currency: Option<String>,
+    pub status: Option<TransactionStatus>,
+    pub idempotency_key: Option<String>,
+    pub parent_tx_key: Option<String>,
+    pub description: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 
     // Flags for dynamic RETURNING/SELECT
-    get_id: Option<bool>,
-    get_transaction_type: Option<bool>,
-    get_from_account_id: Option<bool>,
-    get_to_account_id: Option<bool>,
-    get_amount: Option<bool>,
-    get_currency: Option<bool>,
-    get_status: Option<bool>,
-    get_idempotency_key: Option<bool>,
-    get_parent_tx_key: Option<bool>,
-    get_description: Option<bool>,
-    get_metadata: Option<bool>,
-    get_error_code: Option<bool>,
-    get_error_message: Option<bool>,
-    get_created_at: Option<bool>,
-    get_completed_at: Option<bool>,
+    pub get_id: Option<bool>,
+    pub get_transaction_type: Option<bool>,
+    pub get_from_account_id: Option<bool>,
+    pub get_to_account_id: Option<bool>,
+    pub get_amount: Option<bool>,
+    pub get_currency: Option<bool>,
+    pub get_status: Option<bool>,
+    pub get_idempotency_key: Option<bool>,
+    pub get_parent_tx_key: Option<bool>,
+    pub get_description: Option<bool>,
+    pub get_metadata: Option<bool>,
+    pub get_error_code: Option<bool>,
+    pub get_error_message: Option<bool>,
+    pub get_created_at: Option<bool>,
+    pub get_completed_at: Option<bool>,
 }
 
 impl TransactionBuilder {
@@ -85,7 +88,7 @@ impl TransactionBuilder {
         self
     }
 
-    pub fn amount(mut self, amount: i64) -> Self {
+    pub fn amount(mut self, amount: f64) -> Self {
         self.amount = Some(amount);
         self
     }
@@ -214,7 +217,7 @@ impl TransactionBuilder {
     /// Create a new transaction in the database
     pub async fn create(
         self,
-        mut conn: Option<&mut PoolConnection<Postgres>>,
+        conn: Option<&mut PoolConnection<Postgres>>,
     ) -> Result<Transaction, ServiceError> {
         // Validate required fields
         let transaction_type = self.transaction_type.as_ref().ok_or_else(|| {
@@ -237,16 +240,124 @@ impl TransactionBuilder {
         // Validate transaction type constraints
         self.validate_transaction_accounts(&transaction_type)?;
 
+        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                if let Some(c) = self.0.take() {
+                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                        tracker.return_connection(c);
+                    }
+                }
+            }
+        }
+
+        let mut guard = ConnectionGuard(None);
+        let db_conn = match conn {
+            Some(c) => c,
+            None => {
+                // We're acquiring the connection - manage it with guard
+                let tracker = POOL_STATE_TRACKER
+                    .get()
+                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+                let c = tracker.get_connection().await.map_err(|e| {
+                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
+                })?;
+                guard.0 = Some(c);
+                guard.0.as_mut().unwrap()
+            }
+        };
+
+        // Before quering this table, check if the parent_tx_key exists for debit and credit transactions
+        let validation_check: bool = Self::basic_create_checks(&self, db_conn).await?;
+        if !validation_check {
+            return Err(ServiceError::ValidationError(
+                "Invalid transaction".to_string(),
+            ));
+        }
+
+        /*
+         - Then convert to storage units
+        */
+        let mut usd_amount: i64 = 0;
+        let mut currency = self.currency.clone();
+        if self.amount.is_some() {
+            /*
+            If currency is not provided, then try to read the currency from the database
+            - if that too not provided then use default USD
+            */
+            if currency.is_none() {
+                let account_res = AccountBuilder::new()
+                    .id(self.from_account_id.unwrap())
+                    .expect_currency()
+                    .read(Some(&mut *db_conn))
+                    .await;
+
+                if let Ok(account) = account_res {
+                    currency = Some(account.currency);
+                } else {
+                    currency = Some(DEFAULT_CURRENCY.to_string());
+                }
+            }
+
+            usd_amount = money::to_storage_units_with_conversion(
+                self.amount.unwrap(),
+                currency.clone().unwrap(),
+            );
+        }
+
+        let mut status = TransactionStatus::Pending;
+        match self.transaction_type.clone() {
+            Some(TransactionType::Transfer) => {
+                /*
+                    If transaction type is transfer
+                    1. create a record for transfer transaction.
+                    2. In this transfer transaction state of the account table wont be changed
+                    3. record will be created as pending
+                */
+
+            }
+            Some(TransactionType::Debit) => {
+                /*
+                    If transaction type is debit
+                    1. create a record for debit transaction.
+                    2. In this debit transaction state of the account table will be changed
+                    3. record will be created as pending
+                */
+                // Load the current account balance and do subtract opearation
+                let _debit_state = TransactionHelper::new(self.clone(), db_conn)
+                    .debit(usd_amount.clone())
+                    .await?;
+                status = TransactionStatus::Pending;
+            }
+            Some(TransactionType::Credit) => {
+                /*
+                    If transaction type is credit
+                    1. create a record for credit transaction.
+                    2. In this credit transaction state of the account table will be changed
+                    3. record will be created as completed
+                */
+                let _credit_state = TransactionHelper::new(self.clone(), db_conn)
+                    .credit(usd_amount.clone())
+                    .await?;
+                status = TransactionStatus::Completed;
+            }
+            _ => {
+                return Err(ServiceError::ValidationError(
+                    "Invalid transaction type".to_string(),
+                ));
+            }
+        }
+
         // Determine which fields to return
         let get_id = self.get_id.unwrap_or(true);
-        let get_transaction_type = self.get_transaction_type.unwrap_or(false);
+        let get_transaction_type = self.get_transaction_type.unwrap_or(true);
         let get_from_account_id = self.get_from_account_id.unwrap_or(false);
         let get_to_account_id = self.get_to_account_id.unwrap_or(false);
-        let get_amount = self.get_amount.unwrap_or(false);
+        let get_amount = self.get_amount.unwrap_or(true);
         let get_currency = self.get_currency.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
-        let get_idempotency_key = self.get_idempotency_key.unwrap_or(false);
-        let get_parent_tx_key = self.get_parent_tx_key.unwrap_or(false);
+        let get_idempotency_key = self.get_idempotency_key.unwrap_or(true);
+        let get_parent_tx_key = self.get_parent_tx_key.unwrap_or(true);
         let get_description = self.get_description.unwrap_or(false);
         let get_metadata = self.get_metadata.unwrap_or(false);
         let get_error_code = self.get_error_code.unwrap_or(false);
@@ -258,25 +369,22 @@ impl TransactionBuilder {
         let build_insert = || {
             // Convert enums to strings for sea-query
             let transaction_type_str = format!("{:?}", transaction_type).to_lowercase();
-            let status_str = self
-                .status
-                .as_ref()
-                .map(|s| format!("{:?}", s).to_lowercase());
+            let status_str = format!("{:?}", status).to_lowercase();
 
             let mut insert = FluentInsert::into(Transactions::Table)
                 .value(Transactions::TransactionType, transaction_type_str)
                 .value(Transactions::FromAccountId, self.from_account_id)
                 .value(Transactions::ToAccountId, self.to_account_id)
-                .value(Transactions::Amount, amount.clone())
-                .value(Transactions::Currency, self.currency.clone())
+                .value(Transactions::Amount, usd_amount)
+                .value(Transactions::Currency, currency)
                 .value(Transactions::Status, status_str)
-                .value(Transactions::IdempotencyKey, self.idempotency_key.clone())
-                .value(Transactions::ParentTxKey, parent_tx_key.clone())
+                .value(Transactions::IdempotencyKey, idempotency_key)
+                .value(Transactions::ParentTxKey, parent_tx_key)
                 .value(Transactions::Description, self.description.clone())
                 .value(Transactions::Metadata, self.metadata.clone())
                 .value(Transactions::ErrorCode, self.error_code.clone())
                 .value(Transactions::ErrorMessage, self.error_message.clone())
-                .value(Transactions::CompletedAt, self.completed_at);
+                .value(Transactions::CompletedAt, Utc::now());
 
             if get_id {
                 insert = insert.returning(Transactions::Id);
@@ -327,38 +435,8 @@ impl TransactionBuilder {
             insert.render()
         };
 
-        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
-        impl Drop for ConnectionGuard {
-            fn drop(&mut self) {
-                if let Some(c) = self.0.take() {
-                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
-                        tracker.return_connection(c);
-                    }
-                }
-            }
-        }
-
-        let mut guard = ConnectionGuard(None);
-        let db_conn = match conn {
-            Some(c) => {
-                // Connection provided by caller - don't manage it with guard
-                &mut **c
-            }
-            None => {
-                // We're acquiring the connection - manage it with guard
-                let tracker = POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                let c = tracker.get_connection().await.map_err(|e| {
-                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
-                })?;
-                guard.0 = Some(c);
-                guard.0.as_mut().unwrap()
-            }
-        };
-
         // Check idempotency if key is provided
-        let exists = Self::check_idempotency_exists(idempotency_key, &mut *db_conn).await;
+        let exists = Self::check_idempotency_exists(idempotency_key, &mut **db_conn).await;
 
         if exists.is_ok() {
             return Err(ServiceError::DuplicateTransaction(format!(
@@ -367,18 +445,18 @@ impl TransactionBuilder {
             )));
         }
 
-        // Before quering this table, check if the parent_tx_key exists for debit and credit transactions
-        let basic_create_check = Self::basic_create_checks(&self, &mut *db_conn).await;
-
         // Execute query
         let (sql, values) = build_insert();
-        let query = sqlx::query_as::<_, Transaction>(&sql);
-        let query = bind_query_as(query, values);
+        let query = sqlx::query::<Postgres>(&sql);
+        let query = bind_query(query, values);
 
-        let result = query
-            .fetch_one(db_conn)
-            .await
-            .map_err(|e| ServiceError::DatabaseError(e.to_string()));
+        let row = query.fetch_one(&mut **db_conn).await.map_err(|e| match e {
+            sqlx::Error::RowNotFound => ServiceError::DatabaseError(e.to_string()),
+            _ => ServiceError::DatabaseError(e.to_string()),
+        })?;
+
+        let result =
+            Transaction::from_row(&row).map_err(|e| ServiceError::DatabaseError(e.to_string()));
 
         result
     }
@@ -474,35 +552,43 @@ impl TransactionBuilder {
         };
 
         let (sql, values) = build_update();
-        let query = sqlx::query_as::<_, Transaction>(&sql);
-        let query = bind_query_as(query, values);
+        let query = sqlx::query::<Postgres>(&sql);
+        let query = bind_query(query, values);
 
-        let mut owned_conn = None;
+        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
+                impl Drop for ConnectionGuard {
+                    fn drop(&mut self) {
+                        if let Some(c) = self.0.take() {
+                            if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                                tracker.return_connection(c);
+                            }
+                        }
+                    }
+                }
+
+        let mut guard = ConnectionGuard(None);
         let db_conn = match conn {
-            Some(c) => &mut **c,
+            Some(c) => c,
             None => {
+                // We're acquiring the connection - manage it with guard
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
                 let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-                owned_conn = Some(c);
-                &mut **owned_conn.as_mut().unwrap()
+                guard.0 = Some(c);
+                guard.0.as_mut().unwrap()
             }
         };
 
-        let result = query
-            .fetch_one(db_conn)
-            .await
-            .map_err(|e| ServiceError::DatabaseError(e.to_string()));
+        let row = query.fetch_one(&mut **db_conn).await.map_err(|e| match e {
+            sqlx::Error::RowNotFound => ServiceError::DatabaseError(e.to_string()),
+            _ => ServiceError::DatabaseError(e.to_string()),
+        })?;
 
-        if let Some(c) = owned_conn {
-            let tracker = POOL_STATE_TRACKER
-                .get()
-                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-            tracker.return_connection(c);
-        }
+        let result =
+            Transaction::from_row(&row).map_err(|e| ServiceError::DatabaseError(e.to_string()));
 
         result
     }
@@ -606,37 +692,43 @@ impl TransactionBuilder {
         };
 
         let (sql, values) = build_select();
-        let query = sqlx::query_as::<_, Transaction>(&sql);
-        let query = bind_query_as(query, values);
+        let query = sqlx::query::<Postgres>(&sql);
+        let query = bind_query(query, values);
 
-        let mut owned_conn = None;
+        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
+                impl Drop for ConnectionGuard {
+                    fn drop(&mut self) {
+                        if let Some(c) = self.0.take() {
+                            if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                                tracker.return_connection(c);
+                            }
+                        }
+                    }
+                }
+
+        let mut guard = ConnectionGuard(None);
         let db_conn = match conn {
-            Some(c) => &mut **c,
+            Some(c) => c,
             None => {
+                // We're acquiring the connection - manage it with guard
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
                 let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-                owned_conn = Some(c);
-                &mut **owned_conn.as_mut().unwrap()
+                guard.0 = Some(c);
+                guard.0.as_mut().unwrap()
             }
         };
 
-        let result = query.fetch_one(db_conn).await.map_err(|e| match e {
-            sqlx::Error::RowNotFound => {
-                ServiceError::TransactionNotFound("Transaction not found".to_string())
-            }
+        let row = query.fetch_one(&mut **db_conn).await.map_err(|e| match e {
+            sqlx::Error::RowNotFound => ServiceError::DatabaseError(e.to_string()),
             _ => ServiceError::DatabaseError(e.to_string()),
-        });
+        })?;
 
-        if let Some(c) = owned_conn {
-            let tracker = POOL_STATE_TRACKER
-                .get()
-                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-            tracker.return_connection(c);
-        }
+        let result =
+            Transaction::from_row(&row).map_err(|e| ServiceError::DatabaseError(e.to_string()));
 
         result
     }
@@ -731,7 +823,7 @@ impl TransactionBuilder {
 
             // Check if account has sufficient balance
             if let Some(amount) = self.amount {
-                if money::to_storage_units(from_account.balance) < amount {
+                if from_account.balance < amount {
                     return Err(ServiceError::InsufficientBalance {
                         account_id: from_account_id.to_string(),
                         required: amount,
@@ -792,6 +884,37 @@ impl TransactionBuilder {
                     }
                     TransactionType::Transfer => {
                         // Transfer transactions don't need this validation
+                        // Out sqlgenerator doesn't support OR statements for now - so we need to do this twice.
+                        // - its twice load on db and known issue.
+                        // Check if EITHER idempotency_key OR parent_tx_key exists
+
+                        // Check idempotency_key
+                        let idempotency_exists = TransactionBuilder::new()
+                            .idempotency_key(self.idempotency_key.clone().unwrap())
+                            .expect_id()
+                            .read(Some(conn))
+                            .await;
+
+                        if idempotency_exists.is_ok() {
+                            return Err(ServiceError::ValidationError(format!(
+                                "Transaction with idempotency_key '{}' already exists",
+                                self.idempotency_key.as_ref().unwrap()
+                            )));
+                        }
+
+                        // Check parent_tx_key
+                        let parent_tx_exists = TransactionBuilder::new()
+                            .parent_tx_key(self.parent_tx_key.clone().unwrap())
+                            .expect_id()
+                            .read(Some(conn))
+                            .await;
+
+                        if parent_tx_exists.is_ok() {
+                            return Err(ServiceError::ValidationError(format!(
+                                "Transaction with parent_tx_key '{}' already exists",
+                                self.parent_tx_key.as_ref().unwrap()
+                            )));
+                        }
                     }
                 }
             }
@@ -839,4 +962,9 @@ macro_rules! impl_bind_values {
 impl_bind_values!(
     bind_query_as,
     sqlx::query::QueryAs<'a, Postgres, Transaction, sqlx::postgres::PgArguments>
+);
+
+impl_bind_values!(
+    bind_query,
+    sqlx::query::Query<'a, Postgres, sqlx::postgres::PgArguments>
 );

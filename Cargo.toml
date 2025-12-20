@@ -57,3 +57,11 @@ default = ["sqlx"]
 [[test]]
 name = "account_test"
 path = "Tests/crud/account_test.rs"
+
+[[test]]
+name = "transaction_helper_test"
+path = "Tests/crud/transaction_helper_test.rs"
+
+[[test]]
+name = "transaction_test"
+path = "Tests/crud/transaction_test.rs"
