@@ -113,8 +113,7 @@ async fn test_create_api_key() {
     println!("   - Key Prefix: {}", api_key.key_prefix);
     println!("   - Name: {:?}", api_key.name);
     println!("   - Status: {}", api_key.status);
-    println!("   - Rate Limit (min): {:?}", api_key.rate_limit_per_minute);
-    println!("   - Rate Limit (hour): {:?}", api_key.rate_limit_per_hour);
+
 
     // === VERIFICATION ===
     assert_eq!(api_key.account_id, account.id);
@@ -122,8 +121,6 @@ async fn test_create_api_key() {
     assert_eq!(api_key.key_prefix, key_prefix);
     assert_eq!(api_key.name, Some("Test API Key".to_string()));
     assert_eq!(api_key.status, "active");
-    assert_eq!(api_key.rate_limit_per_minute, Some(100));
-    assert_eq!(api_key.rate_limit_per_hour, Some(1000));
 
     // Cleanup
     println!("\n🧹 Cleaning up...");
@@ -367,19 +364,9 @@ async fn test_update_api_key() {
 
     println!("✅ API key updated:");
     println!("   - New Name: {:?}", updated_key.name);
-    println!(
-        "   - New Rate Limit (min): {:?}",
-        updated_key.rate_limit_per_minute
-    );
-    println!(
-        "   - New Rate Limit (hour): {:?}",
-        updated_key.rate_limit_per_hour
-    );
 
     assert_eq!(updated_key.id, created_key.id);
     assert_eq!(updated_key.name, Some("Updated API Key Name".to_string()));
-    assert_eq!(updated_key.rate_limit_per_minute, Some(200));
-    assert_eq!(updated_key.rate_limit_per_hour, Some(2000));
 
     // Cleanup
     let _ = sqlx::query("DELETE FROM api_keys WHERE id = $1")

@@ -233,8 +233,6 @@ impl ApiKeyBuilder {
 
         // Use defaults for optional fields
         let status = self.status.unwrap_or_else(|| "active".to_string());
-        let rate_limit_per_minute = self.rate_limit_per_minute.or(Some(100));
-        let rate_limit_per_hour = self.rate_limit_per_hour.or(Some(1000));
         let permissions = self
             .permissions
             .or_else(|| Some(serde_json::json!(["read", "write"])));
@@ -246,8 +244,6 @@ impl ApiKeyBuilder {
         let get_key_prefix = self.get_key_prefix.unwrap_or(false);
         let get_name = self.get_name.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
-        let get_rate_limit_per_minute = self.get_rate_limit_per_minute.unwrap_or(false);
-        let get_rate_limit_per_hour = self.get_rate_limit_per_hour.unwrap_or(false);
         let get_permissions = self.get_permissions.unwrap_or(false);
         let get_last_used_at = self.get_last_used_at.unwrap_or(false);
         let get_expires_at = self.get_expires_at.unwrap_or(false);
@@ -262,8 +258,6 @@ impl ApiKeyBuilder {
                 .value(ApiKeys::KeyPrefix, key_prefix.clone())
                 .value(ApiKeys::Name, self.name.clone())
                 .value(ApiKeys::Status, status.clone())
-                .value(ApiKeys::RateLimitPerMinute, rate_limit_per_minute)
-                .value(ApiKeys::RateLimitPerHour, rate_limit_per_hour)
                 .value(ApiKeys::Permissions, permissions.clone())
                 .value(ApiKeys::LastUsedAt, self.last_used_at)
                 .value(ApiKeys::ExpiresAt, self.expires_at)
@@ -288,12 +282,7 @@ impl ApiKeyBuilder {
             if get_status {
                 insert = insert.returning(ApiKeys::Status);
             }
-            if get_rate_limit_per_minute {
-                insert = insert.returning(ApiKeys::RateLimitPerMinute);
-            }
-            if get_rate_limit_per_hour {
-                insert = insert.returning(ApiKeys::RateLimitPerHour);
-            }
+
             if get_permissions {
                 insert = insert.returning(ApiKeys::Permissions);
             }
@@ -424,8 +413,6 @@ impl ApiKeyBuilder {
         let get_key_prefix = self.get_key_prefix.unwrap_or(false);
         let get_name = self.get_name.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
-        let get_rate_limit_per_minute = self.get_rate_limit_per_minute.unwrap_or(false);
-        let get_rate_limit_per_hour = self.get_rate_limit_per_hour.unwrap_or(false);
         let get_permissions = self.get_permissions.unwrap_or(false);
         let get_last_used_at = self.get_last_used_at.unwrap_or(false);
         let get_expires_at = self.get_expires_at.unwrap_or(false);
@@ -436,8 +423,7 @@ impl ApiKeyBuilder {
             let mut update = FluentUpdate::table(ApiKeys::Table)
                 .value(ApiKeys::Name, self.name.clone())
                 .value(ApiKeys::Status, self.status.clone())
-                .value(ApiKeys::RateLimitPerMinute, self.rate_limit_per_minute)
-                .value(ApiKeys::RateLimitPerHour, self.rate_limit_per_hour)
+
                 .value(ApiKeys::Permissions, self.permissions.clone())
                 .value(ApiKeys::LastUsedAt, self.last_used_at)
                 .value(ApiKeys::ExpiresAt, self.expires_at)
@@ -462,12 +448,7 @@ impl ApiKeyBuilder {
             if get_status {
                 update = update.returning(ApiKeys::Status);
             }
-            if get_rate_limit_per_minute {
-                update = update.returning(ApiKeys::RateLimitPerMinute);
-            }
-            if get_rate_limit_per_hour {
-                update = update.returning(ApiKeys::RateLimitPerHour);
-            }
+
             if get_permissions {
                 update = update.returning(ApiKeys::Permissions);
             }
@@ -511,8 +492,6 @@ impl ApiKeyBuilder {
         let get_key_prefix = self.get_key_prefix.unwrap_or(false);
         let get_name = self.get_name.unwrap_or(false);
         let get_status = self.get_status.unwrap_or(false);
-        let get_rate_limit_per_minute = self.get_rate_limit_per_minute.unwrap_or(false);
-        let get_rate_limit_per_hour = self.get_rate_limit_per_hour.unwrap_or(false);
         let get_permissions = self.get_permissions.unwrap_or(false);
         let get_last_used_at = self.get_last_used_at.unwrap_or(false);
         let get_expires_at = self.get_expires_at.unwrap_or(false);
@@ -540,12 +519,6 @@ impl ApiKeyBuilder {
             }
             if get_status {
                 select = select.column(ApiKeys::Status);
-            }
-            if get_rate_limit_per_minute {
-                select = select.column(ApiKeys::RateLimitPerMinute);
-            }
-            if get_rate_limit_per_hour {
-                select = select.column(ApiKeys::RateLimitPerHour);
             }
             if get_permissions {
                 select = select.column(ApiKeys::Permissions);

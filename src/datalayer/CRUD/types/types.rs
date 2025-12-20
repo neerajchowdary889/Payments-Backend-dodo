@@ -45,10 +45,6 @@ pub enum ApiKeys {
     KeyPrefix,
     Name,
     Status,
-    #[iden = "rate_limit_per_minute"]
-    RateLimitPerMinute,
-    #[iden = "rate_limit_per_hour"]
-    RateLimitPerHour,
     Permissions,
     #[iden = "last_used_at"]
     LastUsedAt,
@@ -173,8 +169,6 @@ pub struct ApiKey {
     pub key_prefix: String,
     pub name: Option<String>,
     pub status: String,
-    pub rate_limit_per_minute: Option<i32>,
-    pub rate_limit_per_hour: Option<i32>,
     pub permissions: Option<serde_json::Value>, // JSONB ["read", "write"]
     pub last_used_at: Option<DateTime<Utc>>,
     pub expires_at: Option<DateTime<Utc>>,

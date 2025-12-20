@@ -69,9 +69,9 @@ name = "transfer_flow_test"
 path = "Tests/crud/transfer_flow_test.rs"
 
 [[test]]
-name = "api_key_test"
-path = "Tests/crud/api_key_test.rs"
-
-[[test]]
 name = "rate_limiter_test"
 path = "Tests/crud/rate_limiter_test.rs"
+
+[[test]]
+name = "api_key_test"
+path = "Tests/crud/api_key_test.rs"
