@@ -73,7 +73,7 @@ async fn test_account_create_update_read_flow() {
             // Assertions
             assert_eq!(account.business_name, "Test Business Inc.");
             assert_eq!(account.email, "test@example.com");
-            assert_eq!(account.balance, 0);
+            assert_eq!(account.balance, 0.0);
             assert_eq!(account.currency, "USD");
             assert_eq!(account.status, "active");
 

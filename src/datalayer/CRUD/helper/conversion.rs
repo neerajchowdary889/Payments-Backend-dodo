@@ -33,6 +33,26 @@ impl Currency {
     }
 }
 
+pub fn map_currency(currency: String) -> Result<Currency, ServiceError> {
+    match currency.to_lowercase().as_str() {
+        "usd" => Ok(Currency::USD),
+        "eur" => Ok(Currency::EUR),
+        "gbp" => Ok(Currency::GBP),
+        "chf" => Ok(Currency::CHF),
+        "aed" => Ok(Currency::AED),
+        "kwd" => Ok(Currency::KWD),
+        "inr" => Ok(Currency::INR),
+        "cny" => Ok(Currency::CNY),
+        "krw" => Ok(Currency::KRW),
+        "jpy" => Ok(Currency::JPY),
+        "cad" => Ok(Currency::CAD),
+        "brl" => Ok(Currency::BRL),
+        "ars" => Ok(Currency::ARS),
+        "aud" => Ok(Currency::AUD),
+        _ => Err(ServiceError::InvalidCurrency),
+    }
+}
+
 pub fn to_usd(amount: f64, currency: Currency) -> Result<f64, ServiceError> {
     // if currency not exist in the enum, return error
     if currency.usd_rate() == 0.0 {
@@ -40,6 +60,15 @@ pub fn to_usd(amount: f64, currency: Currency) -> Result<f64, ServiceError> {
     }
 
     Ok(amount * currency.usd_rate())
+}
+
+pub fn from_usd(amount: f64, currency: Currency) -> Result<f64, ServiceError> {
+    // if currency not exist in the enum, return error
+    if currency.usd_rate() == 0.0 {
+        return Err(ServiceError::InvalidCurrency);
+    }
+
+    Ok(amount / currency.usd_rate())
 }
 
 #[cfg(test)]
@@ -54,9 +83,11 @@ mod tests {
 
         println!("Converting {} {} to USD", amount, "USD");
         let result = to_usd(amount, currency).unwrap();
-
+        let return_result = from_usd(result, currency).unwrap();
         println!("Result: ${:.2}", result);
+        println!("Return Result: ${:.2}", return_result);
         assert_eq!(result, 100.0);
+        assert_eq!(return_result, 100.0);
         println!("✅ Test passed: USD to USD conversion is 1:1");
     }
 
@@ -70,9 +101,11 @@ mod tests {
         println!("Exchange rate: 1 EUR = {} USD", currency.usd_rate());
 
         let result = to_usd(amount, currency).unwrap();
-
+        let return_result = from_usd(result, currency).unwrap();
         println!("Result: ${:.2}", result);
+        println!("Return Result: ${:.2}", return_result);
         assert_eq!(result, 108.0);
+        assert_eq!(return_result, 100.0);
         println!("✅ Test passed: 100 EUR = $108.00");
     }
 
@@ -118,9 +151,11 @@ mod tests {
         println!("Exchange rate: 1 JPY = {} USD", currency.usd_rate());
 
         let result = to_usd(amount, currency).unwrap();
-
+        let return_result = from_usd(result, currency).unwrap();
         println!("Result: ${:.2}", result);
+        println!("Return Result: ${:.2}", return_result);
         assert_eq!(result, 67.0);
+        assert_eq!(return_result, 10000.0);
         println!("✅ Test passed: 10000 JPY = $67.00");
     }
 
@@ -134,9 +169,11 @@ mod tests {
         println!("Exchange rate: 1 AED = {} USD", currency.usd_rate());
 
         let result = to_usd(amount, currency).unwrap();
-
+        let return_result = from_usd(result, currency).unwrap();
         println!("Result: ${:.2}", result);
+        println!("Return Result: ${:.2}", return_result);
         assert_eq!(result, 27.0);
+        assert_eq!(return_result, 100.0);
         println!("✅ Test passed: 100 AED = $27.00");
     }
 
@@ -150,9 +187,11 @@ mod tests {
         println!("Exchange rate: 1 KWD = {} USD", currency.usd_rate());
 
         let result = to_usd(amount, currency).unwrap();
-
+        let return_result = from_usd(result, currency).unwrap();
         println!("Result: ${:.2}", result);
+        println!("Return Result: ${:.2}", return_result);
         assert_eq!(result, 32.5);
+        assert_eq!(return_result, 10.0);
         println!("✅ Test passed: 10 KWD = $32.50 (KWD is high-value currency)");
     }
 
@@ -164,9 +203,11 @@ mod tests {
 
         println!("Converting {} EUR to USD", amount);
         let result = to_usd(amount, currency).unwrap();
-
+        let return_result = from_usd(result, currency).unwrap();
         println!("Result: ${:.2}", result);
+        println!("Return Result: ${:.2}", return_result);
         assert_eq!(result, 0.0);
+        assert_eq!(return_result, 0.0);
         println!("✅ Test passed: 0 EUR = $0.00");
     }
 
@@ -178,9 +219,11 @@ mod tests {
 
         println!("Converting ${:.2} USD to USD", amount);
         let result = to_usd(amount, currency).unwrap();
-
+        let return_result = from_usd(result, currency).unwrap();
         println!("Result: ${:.2}", result);
+        println!("Return Result: ${:.2}", return_result);
         assert_eq!(result, 1_000_000.0);
+        assert_eq!(return_result, 1_000_000.0);
         println!("✅ Test passed: Large amount conversion works correctly");
     }
 

@@ -1,3 +1,4 @@
+use crate::datalayer::CRUD::money::from_storage_units;
 use chrono::{DateTime, Utc};
 use sea_query::Iden;
 use serde::{Deserialize, Serialize};
@@ -97,18 +98,42 @@ pub enum Currency {
 }
 
 /// Account struct matching the accounts table schema
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+///
+/// Note: `balance` is stored in database as BIGINT (storage units with DENOMINATOR=10000)
+/// but exposed as f64 (dollars) in the API. Conversion happens automatically via FromRow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub id: Uuid,
     pub business_name: String,
     pub email: String,
-    pub balance: i64,
+    pub balance: f64, // API uses dollars, DB stores as i64 storage units
     pub currency: String,
     pub status: String,
-    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+// Custom FromRow implementation to convert balance from i64 (storage units) to f64 (dollars)
+impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for Account {
+    fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+
+        let balance_storage_units: i64 = row.try_get("balance")?;
+
+        Ok(Account {
+            id: row.try_get("id")?,
+            business_name: row.try_get("business_name")?,
+            email: row.try_get("email")?,
+            balance: from_storage_units(balance_storage_units),
+            currency: row.try_get("currency")?,
+            status: row.try_get("status")?,
+            metadata: row.try_get("metadata").ok(),
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
 }
 
 // --- API KEYS ---
@@ -149,24 +174,55 @@ pub enum TransactionStatus {
     Reversed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+/// Transaction struct matching the transactions table schema
+///
+/// Note: `amount` is stored in database as BIGINT (storage units with DENOMINATOR=10000)
+/// but exposed as f64 (dollars) in the API. Conversion happens automatically via FromRow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: Uuid,
     pub transaction_type: TransactionType,
     pub from_account_id: Option<Uuid>,
     pub to_account_id: Option<Uuid>,
-    pub amount: i64,
+    pub amount: f64, // API uses dollars, DB stores as i64 storage units
     pub currency: String,
     pub status: TransactionStatus,
     pub idempotency_key: String,
     pub parent_tx_key: String,
     pub description: Option<String>,
-    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
+}
+
+// Custom FromRow implementation to convert amount from i64 (storage units) to f64 (dollars)
+impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for Transaction {
+    fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+
+        let amount_storage_units: i64 = row.try_get("amount")?;
+
+        Ok(Transaction {
+            id: row.try_get("id")?,
+            transaction_type: row.try_get("transaction_type")?,
+            from_account_id: row.try_get("from_account_id").ok(),
+            to_account_id: row.try_get("to_account_id").ok(),
+            amount: from_storage_units(amount_storage_units),
+            currency: row.try_get("currency")?,
+            status: row.try_get("status")?,
+            idempotency_key: row.try_get("idempotency_key")?,
+            parent_tx_key: row.try_get("parent_tx_key")?,
+            description: row.try_get("description").ok(),
+            metadata: row.try_get("metadata").ok(),
+            error_code: row.try_get("error_code").ok(),
+            error_message: row.try_get("error_message").ok(),
+            created_at: row.try_get("created_at")?,
+            completed_at: row.try_get("completed_at").ok(),
+        })
+    }
 }
 
 // --- WEBHOOKS ---

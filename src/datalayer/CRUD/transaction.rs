@@ -1,10 +1,11 @@
 use super::types::{Transaction, TransactionStatus, TransactionType};
 use crate::datalayer::CRUD::accounts::AccountBuilder;
+use crate::datalayer::CRUD::money;
 use crate::datalayer::CRUD::sql_generator::sql_generator::{
     FluentInsert, FluentSelect, FluentUpdate,
 };
-use crate::datalayer::CRUD::types::{Account, Transactions};
-use crate::datalayer::db_ops::constants::POOL_STATE_TRACKER;
+use crate::datalayer::CRUD::types::Transactions;
+use crate::datalayer::db_ops::constants::{DENOMINATOR, POOL_STATE_TRACKER};
 use crate::errors::errors::ServiceError;
 use sea_query::Value;
 use sqlx::Postgres;
@@ -13,6 +14,15 @@ use sqlx::postgres::PgConnection;
 use uuid::Uuid;
 
 /// Builder for Transaction operations
+///
+/// ## Money Representation
+///
+/// All monetary amounts in transactions are stored as `i64` integers with 4 decimal
+/// places of precision using the DENOMINATOR constant (10000).
+///
+/// - Storage unit = dollars * DENOMINATOR
+/// - Example: $10.50 = 105000 storage units
+/// - See `crate::datalayer::CRUD::money` for conversion utilities
 #[derive(Debug, Clone, Default)]
 pub struct TransactionBuilder {
     // Transaction fields
@@ -213,6 +223,10 @@ impl TransactionBuilder {
         let amount = self.amount.as_ref().ok_or_else(|| {
             ServiceError::ValidationError("Missing amount for create".to_string())
         })?;
+
+        // Validate amount is positive and within bounds
+        money::validate_amount(*amount)?;
+
         let idempotency_key = self.idempotency_key.as_ref().ok_or_else(|| {
             ServiceError::ValidationError("Missing idempotency_key for create".to_string())
         })?;
@@ -497,98 +511,6 @@ impl TransactionBuilder {
 
         result
     }
-    #[allow(unused_doc_comments)]
-    async fn basic_create_checks(
-        &self,
-        conn: &mut PoolConnection<Postgres>,
-    ) -> Result<bool, ServiceError> {
-        /// 1. Check if the from_account_id exists
-        /// 2. if the account is positive and have balance to proceed with the transaction
-        /// 3. Check if the to_account_id exists
-        /// 4. If transaction_type is debit, check if the tranfer record, parent_tx_key exist and same or not.
-        /// 5. If transaction_type is credit, check if the debit record, parent_tx_key exist and same or not.
-        // Checks 1 and 2
-        // as the key account_id is foreign key, we need to check if the account exists
-        // Extract from_account_id before consuming self
-        if let Some(from_account_id) = self.from_account_id {
-            let from_account = AccountBuilder::new()
-                .id(from_account_id)
-                .expect_id()
-                .expect_balance()
-                .read(Some(conn))
-                .await
-                .map_err(|_| ServiceError::AccountNotFound(from_account_id.to_string()))?;
-
-            // Check if account has sufficient balance
-            if let Some(amount) = self.amount {
-                if from_account.balance < amount {
-                    return Err(ServiceError::InsufficientBalance {
-                        account_id: from_account_id.to_string(),
-                        required: amount,
-                    });
-                }
-            }
-        }
-
-        // Check 3
-        if let Some(to_account_id) = self.to_account_id {
-            let to_account = AccountBuilder::new()
-                .id(to_account_id)
-                .expect_id()
-                .read(Some(conn))
-                .await;
-
-            if to_account.is_err() {
-                return Err(ServiceError::AccountNotFound(to_account_id.to_string()));
-            }
-        }
-
-        // Check 4: If transaction_type is debit, check if the transfer record with parent_tx_key exists
-        // Check 5: If transaction_type is credit, check if the debit record with parent_tx_key exists
-        if let Some(transaction_type) = self.transaction_type.as_ref() {
-            if let Some(parent_tx_key) = self.parent_tx_key.as_ref() {
-                match transaction_type {
-                    TransactionType::Debit => {
-                        // For Debit, verify that a Transfer transaction with this parent_tx_key exists
-                        let transfer_exists = TransactionBuilder::new()
-                            .transaction_type(TransactionType::Transfer)
-                            .parent_tx_key(parent_tx_key.clone())
-                            .expect_id()
-                            .read(Some(conn))
-                            .await;
-
-                        if transfer_exists.is_err() {
-                            return Err(ServiceError::ValidationError(format!(
-                                "No transfer transaction found with parent_tx_key: {}",
-                                parent_tx_key
-                            )));
-                        }
-                    }
-                    TransactionType::Credit => {
-                        // For Credit, verify that a Debit transaction with this parent_tx_key exists
-                        let debit_exists = TransactionBuilder::new()
-                            .transaction_type(TransactionType::Debit)
-                            .parent_tx_key(parent_tx_key.clone())
-                            .expect_id()
-                            .read(Some(conn))
-                            .await;
-
-                        if debit_exists.is_err() {
-                            return Err(ServiceError::ValidationError(format!(
-                                "No debit transaction found with parent_tx_key: {}",
-                                parent_tx_key
-                            )));
-                        }
-                    }
-                    TransactionType::Transfer => {
-                        // Transfer transactions don't need this validation
-                    }
-                }
-            }
-        }
-
-        Ok(true)
-    }
 
     /// Read a transaction from the database
     pub async fn read(
@@ -789,6 +711,101 @@ impl TransactionBuilder {
         }
         Ok(())
     }
+
+        
+    #[allow(unused_doc_comments)]
+    async fn basic_create_checks(
+        &self,
+        conn: &mut PoolConnection<Postgres>,
+    ) -> Result<bool, ServiceError> {
+        /// 1. Check if the from_account_id exists
+        /// 2. if the account is positive and have balance to proceed with the transaction
+        /// 3. Check if the to_account_id exists
+        /// 4. If transaction_type is debit, check if the tranfer record, parent_tx_key exist and same or not.
+        /// 5. If transaction_type is credit, check if the debit record, parent_tx_key exist and same or not.
+        // Checks 1 and 2
+        // as the key account_id is foreign key, we need to check if the account exists
+        // Extract from_account_id before consuming self
+        if let Some(from_account_id) = self.from_account_id {
+            let from_account = AccountBuilder::new()
+                .id(from_account_id)
+                .expect_id()
+                .expect_balance()
+                .read(Some(conn))
+                .await
+                .map_err(|_| ServiceError::AccountNotFound(from_account_id.to_string()))?;
+
+            // Check if account has sufficient balance
+            if let Some(amount) = self.amount {
+                if money::to_storage_units(from_account.balance) < amount {
+                    return Err(ServiceError::InsufficientBalance {
+                        account_id: from_account_id.to_string(),
+                        required: amount,
+                    });
+                }
+            }
+        }
+
+        // Check 3
+        if let Some(to_account_id) = self.to_account_id {
+            let to_account = AccountBuilder::new()
+                .id(to_account_id)
+                .expect_id()
+                .read(Some(conn))
+                .await;
+
+            if to_account.is_err() {
+                return Err(ServiceError::AccountNotFound(to_account_id.to_string()));
+            }
+        }
+
+        // Check 4: If transaction_type is debit, check if the transfer record with parent_tx_key exists
+        // Check 5: If transaction_type is credit, check if the debit record with parent_tx_key exists
+        if let Some(transaction_type) = self.transaction_type.as_ref() {
+            if let Some(parent_tx_key) = self.parent_tx_key.as_ref() {
+                match transaction_type {
+                    TransactionType::Debit => {
+                        // For Debit, verify that a Transfer transaction with this parent_tx_key exists
+                        let transfer_exists = TransactionBuilder::new()
+                            .transaction_type(TransactionType::Transfer)
+                            .parent_tx_key(parent_tx_key.clone())
+                            .expect_id()
+                            .read(Some(conn))
+                            .await;
+
+                        if transfer_exists.is_err() {
+                            return Err(ServiceError::ValidationError(format!(
+                                "No transfer transaction found with parent_tx_key: {}",
+                                parent_tx_key
+                            )));
+                        }
+                    }
+                    TransactionType::Credit => {
+                        // For Credit, verify that a Debit transaction with this parent_tx_key exists
+                        let debit_exists = TransactionBuilder::new()
+                            .transaction_type(TransactionType::Debit)
+                            .parent_tx_key(parent_tx_key.clone())
+                            .expect_id()
+                            .read(Some(conn))
+                            .await;
+
+                        if debit_exists.is_err() {
+                            return Err(ServiceError::ValidationError(format!(
+                                "No debit transaction found with parent_tx_key: {}",
+                                parent_tx_key
+                            )));
+                        }
+                    }
+                    TransactionType::Transfer => {
+                        // Transfer transactions don't need this validation
+                    }
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
 }
 
 /// Helper macro to implement binding for different query types

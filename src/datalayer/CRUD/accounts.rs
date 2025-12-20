@@ -1,10 +1,11 @@
 use super::types::Account;
 use crate::datalayer::CRUD::helper;
+use crate::datalayer::CRUD::money::money;
 use crate::datalayer::CRUD::sql_generator::sql_generator::{
     FluentInsert, FluentSelect, FluentUpdate,
 };
 use crate::datalayer::CRUD::types::Accounts;
-use crate::datalayer::db_ops::constants::POOL_STATE_TRACKER;
+use crate::datalayer::db_ops::constants::{DEFAULT_CURRENCY, POOL_STATE_TRACKER};
 use crate::errors::errors::ServiceError;
 use sea_query::{Cond, Expr, PostgresQueryBuilder, Query, Value};
 use sqlx::Postgres;
@@ -12,12 +13,21 @@ use sqlx::pool::PoolConnection;
 use uuid::Uuid;
 
 /// Builder for creating new accounts
+///
+/// ## Money Representation
+///
+/// Account balances are stored as `i64` integers with 4 decimal places of precision
+/// using the DENOMINATOR constant (10000).
+///
+/// - Storage unit = dollars * DENOMINATOR  
+/// - Example: $10.50 = 105000 storage units
+/// - See `crate::datalayer::CRUD::money` for conversion utilities
 #[derive(Debug)]
 pub struct AccountBuilder {
     business_name: Option<String>,
     email: Option<String>,
     currency: Option<String>,
-    balance: Option<i64>,
+    balance: Option<f64>,
     status: Option<String>,
     metadata: Option<serde_json::Value>,
     id: Option<Uuid>,
@@ -76,7 +86,7 @@ impl AccountBuilder {
         self
     }
 
-    pub fn balance(mut self, balance: i64) -> Self {
+    pub fn balance(mut self, balance: f64) -> Self {
         self.balance = Some(balance);
         self
     }
@@ -142,6 +152,7 @@ impl AccountBuilder {
     }
 
     /// Create a new account in the database
+    /// Create is not associated with any money operations so no need to convert balance to storage units
     pub async fn create(
         self,
         conn: Option<&mut PoolConnection<Postgres>>,
@@ -248,18 +259,33 @@ impl AccountBuilder {
             _ => ServiceError::DatabaseError(e.to_string()),
         };
 
-        let mut owned_conn = None;
+        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                if let Some(c) = self.0.take() {
+                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                        tracker.return_connection(c);
+                    }
+                }
+            }
+        }
+
+        let mut guard = ConnectionGuard(None);
         let db_conn = match conn {
-            Some(c) => &mut **c,
+            Some(c) => {
+                // Connection provided by caller - don't manage it with guard
+                &mut **c
+            }
             None => {
+                // We're acquiring the connection - manage it with guard
                 let tracker = POOL_STATE_TRACKER
                     .get()
                     .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
                 let c = tracker.get_connection().await.map_err(|e| {
                     ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
                 })?;
-                owned_conn = Some(c);
-                &mut **owned_conn.as_mut().unwrap()
+                guard.0 = Some(c);
+                guard.0.as_mut().unwrap()
             }
         };
 
@@ -267,12 +293,6 @@ impl AccountBuilder {
             .await
             .unwrap_or(false)
         {
-            if let Some(c) = owned_conn {
-                let tracker = POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                tracker.return_connection(c);
-            }
             return Err(ServiceError::AccountAlreadyExists(format!(
                 "email:{} or business name:{} already exists",
                 email, business_name
@@ -285,52 +305,52 @@ impl AccountBuilder {
 
         let result = query.fetch_one(db_conn).await.map_err(handle_error);
 
-        if let Some(c) = owned_conn {
-            let tracker = POOL_STATE_TRACKER
-                .get()
-                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-            tracker.return_connection(c);
-        }
-
         result
     }
 
     /// Update an existing account in the database
+    /// update is associated with the money operations so balance is in storage units, need to convert this to dollars
     pub async fn update(
         self,
         conn: Option<&mut PoolConnection<Postgres>>,
     ) -> Result<Account, ServiceError> {
+        // Sort out the connection issues here rather than bottom
+        // This should be bottom of the function actually so save connection locking time so that when we see lot of request over period of time
+        // - we save locking time significant. 
+        // But for the quick refactor we made this in top for this funciton. 
+        struct ConnectionGuard(Option<PoolConnection<Postgres>>);
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                if let Some(c) = self.0.take() {
+                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                        tracker.return_connection(c);
+                    }
+                }
+            }
+        }
+
+        let mut guard = ConnectionGuard(None);
+        let db_conn = match conn {
+            Some(c) => {
+                // Connection provided by caller - don't manage it with guard
+                c
+            }
+            None => {
+                // We're acquiring the connection - manage it with guard
+                let tracker = POOL_STATE_TRACKER
+                    .get()
+                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
+                let c = tracker.get_connection().await.map_err(|e| {
+                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
+                })?;
+                guard.0 = Some(c);
+                guard.0.as_mut().unwrap()
+            }
+        };
+
         let id = self
             .id
             .ok_or_else(|| ServiceError::ValidationError("Missing ID for update".to_string()))?;
-
-        // Check if there are any fields to update
-        if self.business_name.is_none()
-            && self.email.is_none()
-            && self.currency.is_none()
-            && self.balance.is_none()
-            && self.status.is_none()
-            && self.metadata.is_none()
-        {
-            // If no updates to fields, we skip FluentUpdate construction?
-            // Actually, we must return the Account. So we should probably do a SELECT if no update?
-            // But FluentUpdate is for UPDATE.
-            // If we run UPDATE accounts SET ... WHERE id=... without values, it's invalid.
-            // But if we have no values to set, we can't use UPDATE to fetch returning.
-            // We should use FluentSelect if no updates.
-            // BUT, the user might want to verify it exists? Or just fetch?
-            // "update" implies side effect.
-            // I will err if nothing to update to be safe, because switching to SELECT is a behavior change.
-            // BUT, strictly speaking, "update" with no changes is a no-op that returns nothing.
-            // But we need to return Account.
-            // Since I cannot leave it empty, I will remove the "return Ok(()) optimization" and rely on FluentUpdate needing at least one value?
-            // FluentUpdate with no values will produce "UPDATE accounts SET WHERE ..." -> Syntax Error.
-            // So I MUST handle this case.
-            // I will force a dummy update (UpdatedAt = Now) which is already there!
-            // .value(Accounts::UpdatedAt, chrono::Utc::now()) is ALWAYS present in build_update!
-            // So `self.business_name.is_none()...` check is irrelevant because UpdatedAt is always updated.
-            // So I can just remove the check block entirely.
-        }
 
         let get_id = self.get_id.unwrap_or(true);
         let get_business_name = self.get_business_name.unwrap_or(false);
@@ -342,12 +362,41 @@ impl AccountBuilder {
         let get_created_at = self.get_created_at.unwrap_or(false);
         let get_updated_at = self.get_updated_at.unwrap_or(false);
 
+        /*
+         If balance is provided, check for the currency - first convert it to USD
+         - Then convert to storage units
+        */
+        let mut usd_balance : i64 = 0;
+        let mut currency = self.currency;
+        if self.balance.is_some() {
+
+            /*
+            If currency is not provided, then try to read the currency from the database
+            - if that too not provided then use default USD
+            */
+            if currency.is_none() {
+                let account_res = AccountBuilder::new()
+                    .id(id)
+                    .expect_currency()
+                    .read(Some(&mut *db_conn))
+                    .await;
+
+                if let Ok(account) = account_res {
+                    currency = Some(account.currency);
+                }else{
+                    currency = Some(DEFAULT_CURRENCY.to_string());
+                }
+            }
+
+            usd_balance = money::to_storage_units_with_conversion(self.balance.unwrap(), currency.clone().unwrap())
+        }
+
         let build_update = || {
             let mut update = FluentUpdate::table(Accounts::Table)
                 .value(Accounts::BusinessName, self.business_name.clone())
                 .value(Accounts::Email, self.email.clone())
-                .value(Accounts::Currency, self.currency.clone())
-                .value(Accounts::Balance, self.balance)
+                .value(Accounts::Currency, currency.clone())
+                .value(Accounts::Balance, usd_balance)
                 .value(Accounts::Status, self.status.clone())
                 .value(Accounts::Metadata, self.metadata.clone())
                 .value(Accounts::UpdatedAt, chrono::Utc::now())
@@ -384,36 +433,14 @@ impl AccountBuilder {
             update.render()
         };
 
-        let mut owned_conn = None;
-        let db_conn = match conn {
-            Some(c) => &mut **c,
-            None => {
-                let tracker = POOL_STATE_TRACKER
-                    .get()
-                    .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-                let c = tracker.get_connection().await.map_err(|e| {
-                    ServiceError::DatabaseError(format!("Failed to get connection: {}", e))
-                })?;
-                owned_conn = Some(c);
-                &mut **owned_conn.as_mut().unwrap()
-            }
-        };
-
         let (sql, values) = build_update();
         let query = sqlx::query_as::<_, Account>(&sql);
         let query = bind_query_as(query, values);
 
         let result = query
-            .fetch_one(db_conn)
+            .fetch_one(&mut **db_conn)
             .await
             .map_err(|e| ServiceError::DatabaseError(e.to_string()));
-
-        if let Some(c) = owned_conn {
-            let tracker = POOL_STATE_TRACKER
-                .get()
-                .ok_or_else(|| ServiceError::DatabaseConnectionError)?;
-            tracker.return_connection(c);
-        }
 
         result
     }
