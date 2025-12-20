@@ -25,7 +25,6 @@ pub enum ServiceError {
     InsufficientBalance {
         account_id: String,
         required: i64,
-        available: i64,
     },
     InvalidTransactionAmount,
     InvalidCurrency,
@@ -110,12 +109,11 @@ impl fmt::Display for ServiceError {
             ServiceError::InsufficientBalance {
                 account_id,
                 required,
-                available,
             } => {
                 write!(
                     f,
-                    "Insufficient balance in account {}: required {}, available {}",
-                    account_id, required, available
+                    "Insufficient balance in account {}: required {}",
+                    account_id, required
                 )
             }
             ServiceError::InvalidTransactionAmount => {
@@ -285,11 +283,9 @@ impl ServiceError {
             ServiceError::InsufficientBalance {
                 account_id,
                 required,
-                available,
             } => Some(serde_json::json!({
                 "account_id": account_id,
                 "required_amount": required,
-                "available_amount": available
             })),
             ServiceError::RateLimitExceeded { retry_after } => Some(serde_json::json!({
                 "retry_after_seconds": retry_after
