@@ -51,7 +51,9 @@ pub enum ServiceError {
 
     // Rate Limiting
     RateLimitExceeded {
-        retry_after: u64, // seconds
+        limit: i32,
+        window: String, // "minute" or "hour"
+        reset_at: chrono::DateTime<chrono::Utc>,
     },
 
     // Database Errors
@@ -140,11 +142,17 @@ impl fmt::Display for ServiceError {
                 write!(f, "Webhook already exists for URL: {}", url)
             }
 
-            ServiceError::RateLimitExceeded { retry_after } => {
+            ServiceError::RateLimitExceeded {
+                limit,
+                window,
+                reset_at,
+            } => {
                 write!(
                     f,
-                    "Rate limit exceeded. Retry after {} seconds",
-                    retry_after
+                    "Rate limit exceeded: {} requests per {}. Resets at {}",
+                    limit,
+                    window,
+                    reset_at.to_rfc3339()
                 )
             }
 
@@ -188,7 +196,7 @@ impl ServiceError {
             ServiceError::AccountNotFound(_)
             | ServiceError::TransactionNotFound(_)
             | ServiceError::WebhookNotFound(_) => StatusCode::NOT_FOUND,
-            
+
             ServiceError::InvalidCurrency => StatusCode::BAD_REQUEST,
 
             // 409 Conflict
@@ -287,8 +295,14 @@ impl ServiceError {
                 "account_id": account_id,
                 "required_amount": required,
             })),
-            ServiceError::RateLimitExceeded { retry_after } => Some(serde_json::json!({
-                "retry_after_seconds": retry_after
+            ServiceError::RateLimitExceeded {
+                limit,
+                window,
+                reset_at,
+            } => Some(serde_json::json!({
+                "limit": limit,
+                "window": window,
+                "reset_at": reset_at.to_rfc3339()
             })),
             ServiceError::IdempotencyKeyMismatch { key, reason } => Some(serde_json::json!({
                 "idempotency_key": key,

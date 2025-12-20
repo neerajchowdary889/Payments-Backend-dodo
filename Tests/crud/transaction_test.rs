@@ -39,28 +39,56 @@ async fn test_transaction_create_read_flow() {
 
     println!("✅ Connection acquired from pool");
 
-    // === STEP 1: CREATE TEST ACCOUNT ===
-    println!("\n📝 STEP 1: Creating test account...");
+    // === STEP 1: CREATE TEST ACCOUNT (without balance) ===
+    println!("\n📝 STEP 1: Creating test account without balance...");
 
     let account = AccountBuilder::new()
-        .business_name("Transaction Test Account".to_string())
+        .business_name(format!("Transaction Test Account {}", Uuid::new_v4()))
         .email(format!("txn_test_{}@example.com", Uuid::new_v4()))
-        .balance(1000.0)
         .currency("USD".to_string())
         .status("active".to_string())
         .expect_id()
+        .expect_business_name()
+        .expect_email()
         .expect_balance()
+        .expect_currency()
+        .expect_status()
         .create(Some(&mut conn))
         .await
         .expect("Failed to create test account");
 
     println!("✅ Account created with ID: {}", account.id);
+    println!("   - Initial Balance: ${}", account.balance);
 
-    // === STEP 2: CREATE TRANSACTION ===
-    println!("\n📝 STEP 2: Creating Credit transaction...");
+    // === STEP 2: UPDATE ACCOUNT WITH BALANCE ===
+    println!("\n💰 STEP 2: Updating account with balance...");
+
+    let updated_account = AccountBuilder::new()
+        .id(account.id)
+        .balance(1000.0)
+        .expect_id()
+        .expect_business_name()
+        .expect_email()
+        .expect_balance()
+        .expect_currency()
+        .expect_status()
+        .expect_created_at()
+        .expect_updated_at()
+        .update(Some(&mut conn))
+        .await
+        .expect("Failed to update account balance");
+
+    println!("✅ Account balance updated");
+    println!("   - New Balance: ${}", updated_account.balance);
+    assert_eq!(updated_account.balance, 1000.0);
+
+    // === STEP 3: CREATE TRANSACTION ===
+    println!("\n📝 STEP 3: Creating Credit transaction...");
 
     let idempotency_key = format!("test_txn_{}", Uuid::new_v4());
-    let parent_tx_key = format!("parent_{}", Uuid::new_v4());
+    // For standalone transactions, use idempotency_key as parent_tx_key
+    // to avoid validation that looks for parent transactions
+    let parent_tx_key = idempotency_key.clone();
 
     let created_txn = TransactionBuilder::new()
         .transaction_type(TransactionType::Credit)
@@ -97,8 +125,8 @@ async fn test_transaction_create_read_flow() {
     assert_eq!(created_txn.idempotency_key, idempotency_key);
     assert_eq!(created_txn.parent_tx_key, parent_tx_key);
 
-    // === STEP 3: READ TRANSACTION BY ID ===
-    println!("\n📖 STEP 3: Reading transaction by ID...");
+    // === STEP 4: READ TRANSACTION BY ID ===
+    println!("\n📖 STEP 4: Reading transaction by ID...");
 
     let read_txn = TransactionBuilder::new()
         .id(created_txn.id)

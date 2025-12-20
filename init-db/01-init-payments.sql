@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     idempotency_key VARCHAR(255) NOT NULL UNIQUE,
 
     -- Parent transaction key
-    parent_tx_key VARCHAR(255) NOT NULL,
+    parent_tx_key VARCHAR(255) NOT NULL DEFAULT '',
     
     -- Description and metadata
     description TEXT,

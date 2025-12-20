@@ -275,6 +275,24 @@ impl TransactionBuilder {
             ));
         }
 
+        // Check idempotency if key is provided
+        let exists = Self::check_idempotency_exists(idempotency_key, &mut **db_conn).await;
+        // DEBUG
+        println!(
+            ">>>> DEBUG :: Checking idempotency key result: {:#?}",
+            exists
+        );
+        if exists.unwrap() == true {
+            return Err(ServiceError::DuplicateTransaction(format!(
+                "Transaction with idempotency_key '{}' already exists",
+                idempotency_key
+            )));
+        }
+        // DEBUG
+        println!(
+            ">>>> DEBUG :: Checking idempotency key: {} Done",
+            idempotency_key
+        );
         /*
          - Then convert to storage units
         */
@@ -314,7 +332,7 @@ impl TransactionBuilder {
                     2. In this transfer transaction state of the account table wont be changed
                     3. record will be created as pending
                 */
-
+                status = TransactionStatus::Pending;
             }
             Some(TransactionType::Debit) => {
                 /*
@@ -348,13 +366,16 @@ impl TransactionBuilder {
             }
         }
 
+        // DEBUG
+        println!(">>> DEBUG :: Status");
+
         // Determine which fields to return
         let get_id = self.get_id.unwrap_or(true);
         let get_transaction_type = self.get_transaction_type.unwrap_or(true);
         let get_from_account_id = self.get_from_account_id.unwrap_or(false);
         let get_to_account_id = self.get_to_account_id.unwrap_or(false);
         let get_amount = self.get_amount.unwrap_or(true);
-        let get_currency = self.get_currency.unwrap_or(false);
+        let get_currency = self.get_currency.unwrap_or(true);
         let get_status = self.get_status.unwrap_or(false);
         let get_idempotency_key = self.get_idempotency_key.unwrap_or(true);
         let get_parent_tx_key = self.get_parent_tx_key.unwrap_or(true);
@@ -435,16 +456,6 @@ impl TransactionBuilder {
             insert.render()
         };
 
-        // Check idempotency if key is provided
-        let exists = Self::check_idempotency_exists(idempotency_key, &mut **db_conn).await;
-
-        if exists.is_ok() {
-            return Err(ServiceError::DuplicateTransaction(format!(
-                "Transaction with idempotency_key '{}' already exists",
-                idempotency_key
-            )));
-        }
-
         // Execute query
         let (sql, values) = build_insert();
         let query = sqlx::query::<Postgres>(&sql);
@@ -475,7 +486,7 @@ impl TransactionBuilder {
         let get_from_account_id = self.get_from_account_id.unwrap_or(false);
         let get_to_account_id = self.get_to_account_id.unwrap_or(false);
         let get_amount = self.get_amount.unwrap_or(false);
-        let get_currency = self.get_currency.unwrap_or(false);
+        let get_currency = self.get_currency.unwrap_or(true);
         let get_status = self.get_status.unwrap_or(false);
         let get_idempotency_key = self.get_idempotency_key.unwrap_or(false);
         let get_description = self.get_description.unwrap_or(false);
@@ -556,15 +567,15 @@ impl TransactionBuilder {
         let query = bind_query(query, values);
 
         struct ConnectionGuard(Option<PoolConnection<Postgres>>);
-                impl Drop for ConnectionGuard {
-                    fn drop(&mut self) {
-                        if let Some(c) = self.0.take() {
-                            if let Some(tracker) = POOL_STATE_TRACKER.get() {
-                                tracker.return_connection(c);
-                            }
-                        }
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                if let Some(c) = self.0.take() {
+                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                        tracker.return_connection(c);
                     }
                 }
+            }
+        }
 
         let mut guard = ConnectionGuard(None);
         let db_conn = match conn {
@@ -599,7 +610,7 @@ impl TransactionBuilder {
         conn: Option<&mut PoolConnection<Postgres>>,
     ) -> Result<Transaction, ServiceError> {
         let get_id = self.get_id.unwrap_or(true);
-        let get_transaction_type = self.get_transaction_type.unwrap_or(false);
+        let get_transaction_type = self.get_transaction_type.unwrap_or(true);
         let get_from_account_id = self.get_from_account_id.unwrap_or(false);
         let get_to_account_id = self.get_to_account_id.unwrap_or(false);
         let get_amount = self.get_amount.unwrap_or(false);
@@ -612,7 +623,7 @@ impl TransactionBuilder {
         let get_error_code = self.get_error_code.unwrap_or(false);
         let get_error_message = self.get_error_message.unwrap_or(false);
         let get_created_at = self.get_created_at.unwrap_or(true);
-        let get_completed_at = self.get_completed_at.unwrap_or(true);
+        let get_completed_at = self.get_completed_at.unwrap_or(false);
 
         let build_select = || {
             let mut select = FluentSelect::from(Transactions::Table);
@@ -696,15 +707,15 @@ impl TransactionBuilder {
         let query = bind_query(query, values);
 
         struct ConnectionGuard(Option<PoolConnection<Postgres>>);
-                impl Drop for ConnectionGuard {
-                    fn drop(&mut self) {
-                        if let Some(c) = self.0.take() {
-                            if let Some(tracker) = POOL_STATE_TRACKER.get() {
-                                tracker.return_connection(c);
-                            }
-                        }
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                if let Some(c) = self.0.take() {
+                    if let Some(tracker) = POOL_STATE_TRACKER.get() {
+                        tracker.return_connection(c);
                     }
                 }
+            }
+        }
 
         let mut guard = ConnectionGuard(None);
         let db_conn = match conn {
@@ -738,6 +749,10 @@ impl TransactionBuilder {
         idempotency_key: &str,
         conn: &mut PgConnection,
     ) -> Result<bool, ServiceError> {
+        println!(
+            ">>>> DEBUG :: Checking idempotency key: {}",
+            idempotency_key
+        );
         let query = "SELECT COUNT(*) FROM transactions WHERE idempotency_key = $1";
         let count: i64 = sqlx::query_scalar(query)
             .bind(idempotency_key)
@@ -745,7 +760,11 @@ impl TransactionBuilder {
             .await
             .map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
 
-        Ok(count > 0)
+        println!(">>>> DEBUG :: Idempotency key exists: {}", count > 0);
+        if count > 0 {
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Validate transaction account constraints based on transaction type
@@ -816,7 +835,13 @@ impl TransactionBuilder {
             let from_account = AccountBuilder::new()
                 .id(from_account_id)
                 .expect_id()
+                .expect_business_name()
+                .expect_email()
                 .expect_balance()
+                .expect_currency()
+                .expect_status()
+                .expect_created_at()
+                .expect_updated_at()
                 .read(Some(conn))
                 .await
                 .map_err(|_| ServiceError::AccountNotFound(from_account_id.to_string()))?;
@@ -837,6 +862,13 @@ impl TransactionBuilder {
             let to_account = AccountBuilder::new()
                 .id(to_account_id)
                 .expect_id()
+                .expect_business_name()
+                .expect_email()
+                .expect_balance()
+                .expect_currency()
+                .expect_status()
+                .expect_created_at()
+                .expect_updated_at()
                 .read(Some(conn))
                 .await;
 
@@ -852,12 +884,31 @@ impl TransactionBuilder {
                 match transaction_type {
                     TransactionType::Debit => {
                         // For Debit, verify that a Transfer transaction with this parent_tx_key exists
+                        println!(
+                            ">>>> DEBUG :: Debit validation - looking for Transfer with parent_tx_key: {}",
+                            parent_tx_key
+                        );
                         let transfer_exists = TransactionBuilder::new()
                             .transaction_type(TransactionType::Transfer)
                             .parent_tx_key(parent_tx_key.clone())
                             .expect_id()
+                            .expect_amount()
+                            .expect_parent_tx_key()
+                            .expect_currency()
+                            .expect_status()
+                            .expect_created_at()
+                            .expect_idempotency_key()
+                            .expect_transaction_type()
                             .read(Some(conn))
                             .await;
+
+                        println!(
+                            ">>>> DEBUG :: Transfer lookup result: {:?}",
+                            transfer_exists
+                                .as_ref()
+                                .map(|t| (&t.id, &t.parent_tx_key))
+                                .map_err(|e| format!("{:?}", e))
+                        );
 
                         if transfer_exists.is_err() {
                             return Err(ServiceError::ValidationError(format!(
@@ -872,6 +923,13 @@ impl TransactionBuilder {
                             .transaction_type(TransactionType::Debit)
                             .parent_tx_key(parent_tx_key.clone())
                             .expect_id()
+                            .expect_amount()
+                            .expect_currency()
+                            .expect_status()
+                            .expect_transaction_type()
+                            .expect_idempotency_key()
+                            .expect_parent_tx_key()
+                            .expect_created_at()
                             .read(Some(conn))
                             .await;
 

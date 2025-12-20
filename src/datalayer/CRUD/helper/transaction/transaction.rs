@@ -29,11 +29,20 @@ impl<'a> TransactionHelper<'a> {
         // create a transaction and return it
         let account = AccountBuilder::new()
             .id(self.txn.from_account_id.unwrap())
+            .expect_id()
+            .expect_business_name()
+            .expect_email()
             .expect_balance()
+            .expect_currency()
+            .expect_status()
+            .expect_created_at()
+            .expect_updated_at()
             .read(Some(self.db_conn))
             .await?;
 
         let new_balance = account.balance - money::from_storage_units(storage_units);
+        // DEBUG
+        println!(">>> DEBUG :: New balance: {}", new_balance);
 
         if new_balance < 0.0 {
             return Err(ServiceError::InsufficientBalance {
@@ -43,11 +52,19 @@ impl<'a> TransactionHelper<'a> {
         }
 
         // convert balance to storage units
-        let _ = AccountBuilder::new()
+        let test = AccountBuilder::new()
             .id(self.txn.from_account_id.unwrap())
             .balance(new_balance)
+            .expect_balance()
+            .expect_business_name()
+            .expect_email()
+            .expect_currency()
+            .expect_status()
+            .expect_created_at()
+            .expect_updated_at()
             .update(Some(self.db_conn))
             .await?;
+        println!(">>> DEBUG :: Updated account: {:#?}", test);
 
         return Ok(true);
     }
@@ -59,7 +76,14 @@ impl<'a> TransactionHelper<'a> {
         // create a transaction and return it
         let account = AccountBuilder::new()
             .id(self.txn.to_account_id.unwrap())
+            .expect_id()
+            .expect_business_name()
+            .expect_email()
             .expect_balance()
+            .expect_currency()
+            .expect_status()
+            .expect_created_at()
+            .expect_updated_at()
             .read(Some(self.db_conn))
             .await?;
 
@@ -69,6 +93,13 @@ impl<'a> TransactionHelper<'a> {
         let _ = AccountBuilder::new()
             .id(self.txn.to_account_id.unwrap())
             .balance(new_balance)
+            .expect_balance()
+            .expect_business_name()
+            .expect_email()
+            .expect_currency()
+            .expect_status()
+            .expect_created_at()
+            .expect_updated_at()
             .update(Some(self.db_conn))
             .await?;
 

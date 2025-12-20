@@ -34,6 +34,33 @@ pub enum Accounts {
 }
 
 #[derive(Iden)]
+pub enum ApiKeys {
+    Table,
+    Id,
+    #[iden = "account_id"]
+    AccountId,
+    #[iden = "key_hash"]
+    KeyHash,
+    #[iden = "key_prefix"]
+    KeyPrefix,
+    Name,
+    Status,
+    #[iden = "rate_limit_per_minute"]
+    RateLimitPerMinute,
+    #[iden = "rate_limit_per_hour"]
+    RateLimitPerHour,
+    Permissions,
+    #[iden = "last_used_at"]
+    LastUsedAt,
+    #[iden = "expires_at"]
+    ExpiresAt,
+    #[iden = "created_at"]
+    CreatedAt,
+    #[iden = "revoked_at"]
+    RevokedAt,
+}
+
+#[derive(Iden)]
 pub enum Transactions {
     Table,
     Id,

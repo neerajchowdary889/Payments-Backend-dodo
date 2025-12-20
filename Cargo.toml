@@ -50,6 +50,7 @@ sea-query = { version = "0.32.7", features = ["thread-safe", "postgres-types", "
 # Testing
 tokio-test = "0.4"
 mockall = "0.12"
+sha2 = "0.10"
 
 [features]
 default = ["sqlx"]
@@ -59,9 +60,13 @@ name = "account_test"
 path = "Tests/crud/account_test.rs"
 
 [[test]]
-name = "transaction_helper_test"
-path = "Tests/crud/transaction_helper_test.rs"
-
-[[test]]
 name = "transaction_test"
 path = "Tests/crud/transaction_test.rs"
+
+[[test]]
+name = "transfer_flow_test"
+path = "Tests/crud/transfer_flow_test.rs"
+
+[[test]]
+name = "api_key_test"
+path = "Tests/crud/api_key_test.rs"

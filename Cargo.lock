@@ -1345,6 +1345,7 @@ dependencies = [
  "sea-query",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tokio-test",
