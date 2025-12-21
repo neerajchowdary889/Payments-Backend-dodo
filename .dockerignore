@@ -1,0 +1,10 @@
+target/
+**/*.rs.bk
+Cargo.lock.bk
+.git/
+.env
+.DS_Store
+*.swp
+tmp/
+coverage/
+doc/

@@ -1,16 +1,15 @@
 # Dodo Payments Backend
 
-A high-performance, containerized financial ledger system built in Rust. Designed for precision, reliability, and efficient resource utilization.
+A Containerized financial ledger system built in Rust. Designed for precision, reliability, and efficient resource utilization.
 
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/Docker-Enabled-blue.svg)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
 
 ## 📖 Overview
 
-Dodo Payments is a robust backend system for handling multi-currency accounts and financial transactions. Unlike standard CRUD applications, it features custom-engineered components to ensure ACID guarantees, zero-precision-loss money handling, and optimal database performance.
+Backend system for handling multi-currency accounts and financial transactions. Unlike standard CRUD applications, it features custom-engineered components to ensure ACID guarantees, zero-precision-loss money handling, and optimal database performance.
 
 For deep technical details, architectures, and tradeoffs, please read the **[Design Document](DESIGN.md)**.
 For API usage, see the **[API Documentation](API.md)** or **[OpenAPI Spec](OPENAPI.md)**.

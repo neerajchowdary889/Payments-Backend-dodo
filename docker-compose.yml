@@ -1,6 +1,25 @@
 version: "3.8"
 
 services:
+  app:
+    build: .
+    container_name: payments-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/payments_db
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - PORT=3000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
   postgres:
     image: postgres:15-alpine
     container_name: payments-postgres
