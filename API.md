@@ -93,7 +93,7 @@ curl http://localhost:3000/health
 
 Create a new account.
 
-**Authentication**: Required
+**Authentication**: None (Public Endpoint)
 
 **Request Body**:
 
@@ -129,7 +129,6 @@ Create a new account.
 
 ```bash
 curl -X POST 'http://localhost:3000/api/v1/accounts' \
-  -H 'Authorization: Bearer pk_live_xxx' \
   -H 'Content-Type: application/json' \
   -d '{
     "business_name": "Acme Corp",
@@ -137,6 +136,33 @@ curl -X POST 'http://localhost:3000/api/v1/accounts' \
     "currency": "USD"
   }'
 ```
+
+---
+
+---
+
+### POST /api/v1/accounts/putbalance
+
+**Authentication**: Required
+
+**Request Body**:
+
+```json
+{
+  "account_id": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+  "balance": 2000.5,
+  "currency": "EUR"
+}
+```
+
+**Fields**:
+
+- `account_id` (UUID, required): Account to update
+- `balance` (number, required): New balance amount
+- `currency` (string, required): Currency code
+
+**Response** (`200 OK`):
+Returns updated account object.
 
 ---
 
@@ -457,7 +483,7 @@ curl 'http://localhost:3000/api/v1/transfer/list?account_id=58c297a9-4dc3-451c-a
 
 ---
 
-### GET /api/v1/transfer/info/:parent_key
+### GET /api/v1/transfer/:parent_key
 
 Get all transactions associated with a parent transaction key.
 
@@ -505,7 +531,7 @@ curl 'http://localhost:3000/api/v1/transfer/info/txgroup_abc123' \
 
 ---
 
-### GET /api/v1/transfer/:id
+### GET /api/v1/transfer/info/:id
 
 Get a specific transaction by ID.
 
