@@ -138,9 +138,7 @@ curl -X POST 'http://localhost:3000/api/v1/accounts' \
 ```
 
 ---
-
----
-
+    
 ### POST /api/v1/accounts/putbalance
 
 **Authentication**: Required
