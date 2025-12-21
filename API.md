@@ -452,23 +452,102 @@ List transfers for an account with pagination.
 
 ```json
 {
-  "transfers": [
-    {
-      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-      "transaction_type": "transfer",
-      "from_account_id": "58c297a9-4dc3-451c-a8a7-1202e3031248",
-      "to_account_id": "b163f805-401b-4a41-8afd-b2903c0c1704",
-      "amount": 75.0,
-      "currency": "USD",
-      "status": "completed",
-      "description": "Payment to vendor",
-      "parent_tx_key": "txgroup_abc123xyz",
-      "created_at": "2025-12-21T16:00:00Z"
-    }
-  ],
-  "total": 42,
-  "limit": 50,
-  "offset": 0
+    "transfers": [
+        {
+            "id": "d0d2e289-41f3-4401-af0f-4d4ebbc59751",
+            "transfer_type": "transfer",
+            "from_account": "e7aec6f0-0524-44f9-9058-bfc2dde986fe",
+            "to_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+            "amount": 150.0,
+            "currency": "USD",
+            "status": "pending",
+            "description": null,
+            "created_at": "2025-12-21T17:28:59.724373+00:00",
+            "idempotency_key": "55b4fcb9-371e-4cc8-9875-43cb69419b98",
+            "parent_tx_key": "txgroup_ef4ab5d3-1771-43ad-b96a-220c4cd6d8e7"
+        },
+        {
+            "id": "f4656bf6-1256-47a8-ba87-85ada3d64e60",
+            "transfer_type": "transfer",
+            "from_account": "e7aec6f0-0524-44f9-9058-bfc2dde986fe",
+            "to_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+            "amount": 150.0,
+            "currency": "USD",
+            "status": "pending",
+            "description": null,
+            "created_at": "2025-12-21T15:25:00.916606+00:00",
+            "idempotency_key": "9d24866f-bdf6-4da5-b304-ef7c7c338a6a",
+            "parent_tx_key": "txgroup_041a9402-d099-4905-bd1a-18b55cb5d7b3"
+        },
+        {
+            "id": "9856c360-9ff2-48d0-b2d3-085e1e05f9c2",
+            "transfer_type": "transfer",
+            "from_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+            "to_account": "e7aec6f0-0524-44f9-9058-bfc2dde986fe",
+            "amount": 15.0,
+            "currency": "USD",
+            "status": "pending",
+            "description": null,
+            "created_at": "2025-12-21T15:20:53.180966+00:00",
+            "idempotency_key": "408519d8-700e-4611-a6bb-2f5afa2aae4a",
+            "parent_tx_key": "txgroup_75b3a9f2-2088-4928-a5ce-6ec038afa084"
+        },
+        {
+            "id": "2145fd85-5a1b-4684-83de-0825a5b79af3",
+            "transfer_type": "transfer",
+            "from_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+            "to_account": "e7aec6f0-0524-44f9-9058-bfc2dde986fe",
+            "amount": 15.0,
+            "currency": "USD",
+            "status": "pending",
+            "description": null,
+            "created_at": "2025-12-21T13:20:31.357259+00:00",
+            "idempotency_key": "1159de27-273c-429d-836b-fb19333ade78",
+            "parent_tx_key": "txgroup_48c6414d-581e-4bde-8f51-998a19c71161"
+        },
+        {
+            "id": "fa9c2a69-02cb-4584-8267-cc329d54f017",
+            "transfer_type": "transfer",
+            "from_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+            "to_account": "e7aec6f0-0524-44f9-9058-bfc2dde986fe",
+            "amount": 0.9,
+            "currency": "inr",
+            "status": "pending",
+            "description": null,
+            "created_at": "2025-12-21T13:18:22.975219+00:00",
+            "idempotency_key": "2d25c417-a04f-4d8d-9f0f-51348d0f9b31",
+            "parent_tx_key": "txgroup_92ea1e96-997f-49cf-b1b8-8d12ab8c7307"
+        },
+        {
+            "id": "fbc814af-ee1f-4fab-bef5-004e68242ee7",
+            "transfer_type": "transfer",
+            "from_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+            "to_account": "b163f805-401b-4a41-8afd-b2903c0c1704",
+            "amount": 0.9,
+            "currency": "inr",
+            "status": "pending",
+            "description": null,
+            "created_at": "2025-12-21T13:16:16.716756+00:00",
+            "idempotency_key": "dc17b628-1bae-49c9-9053-c5b99be0de29",
+            "parent_tx_key": "txgroup_4ad94ec9-cbce-49f9-90af-23918bf84d0d"
+        },
+        {
+            "id": "e217cb13-b5d3-4469-9261-d2d3463eae26",
+            "transfer_type": "transfer",
+            "from_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+            "to_account": "b163f805-401b-4a41-8afd-b2903c0c1704",
+            "amount": 0.9,
+            "currency": "inr",
+            "status": "pending",
+            "description": null,
+            "created_at": "2025-12-21T13:15:46.240129+00:00",
+            "idempotency_key": "aa07d6d8-2c8f-4ae4-a276-ac12387bd480",
+            "parent_tx_key": "txgroup_ee99fa7e-108e-42e8-8b61-d207b6741cb6"
+        }
+    ],
+    "total": 7,
+    "limit": 50,
+    "offset": 0
 }
 ```
 
@@ -495,28 +574,45 @@ Get all transactions associated with a parent transaction key.
 
 ```json
 [
-  {
-    "id": "debit-txn-id",
-    "transaction_type": "debit",
-    "from_account_id": "58c297a9-4dc3-451c-a8a7-1202e3031248",
-    "to_account_id": null,
-    "amount": 75.0,
-    "currency": "USD",
-    "status": "completed",
-    "parent_tx_key": "txgroup_abc123",
-    "created_at": "2025-12-21T16:00:00Z"
-  },
-  {
-    "id": "credit-txn-id",
-    "transaction_type": "credit",
-    "from_account_id": null,
-    "to_account_id": "b163f805-401b-4a41-8afd-b2903c0c1704",
-    "amount": 75.0,
-    "currency": "USD",
-    "status": "completed",
-    "parent_tx_key": "txgroup_abc123",
-    "created_at": "2025-12-21T16:00:00Z"
-  }
+    {
+        "id": "fbc814af-ee1f-4fab-bef5-004e68242ee7",
+        "transfer_type": "transfer",
+        "from_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+        "to_account": "b163f805-401b-4a41-8afd-b2903c0c1704",
+        "amount": 0.9,
+        "currency": "inr",
+        "status": "pending",
+        "description": null,
+        "created_at": "2025-12-21T13:16:16.716756+00:00",
+        "idempotency_key": "dc17b628-1bae-49c9-9053-c5b99be0de29",
+        "parent_tx_key": "txgroup_4ad94ec9-cbce-49f9-90af-23918bf84d0d"
+    },
+    {
+        "id": "82486e1c-903a-4b4a-a893-219804ff4283",
+        "transfer_type": "debit",
+        "from_account": "58c297a9-4dc3-451c-a8a7-1202e3031248",
+        "to_account": null,
+        "amount": 0.9,
+        "currency": "inr",
+        "status": "pending",
+        "description": null,
+        "created_at": "2025-12-21T13:16:16.716756+00:00",
+        "idempotency_key": "dc17b628-1bae-49c9-9053-c5b99be0de29_debit",
+        "parent_tx_key": "txgroup_4ad94ec9-cbce-49f9-90af-23918bf84d0d"
+    },
+    {
+        "id": "4a8b6a2e-9ad8-458a-8833-fb5eeb87a3db",
+        "transfer_type": "credit",
+        "from_account": null,
+        "to_account": "b163f805-401b-4a41-8afd-b2903c0c1704",
+        "amount": 0.9,
+        "currency": "inr",
+        "status": "completed",
+        "description": null,
+        "created_at": "2025-12-21T13:16:16.716756+00:00",
+        "idempotency_key": "dc17b628-1bae-49c9-9053-c5b99be0de29_credit",
+        "parent_tx_key": "txgroup_4ad94ec9-cbce-49f9-90af-23918bf84d0d"
+    }
 ]
 ```
 
@@ -543,16 +639,17 @@ Get a specific transaction by ID.
 
 ```json
 {
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "transaction_type": "transfer",
-  "from_account_id": "58c297a9-4dc3-451c-a8a7-1202e3031248",
-  "to_account_id": "b163f805-401b-4a41-8afd-b2903c0c1704",
-  "amount": 75.0,
-  "currency": "USD",
-  "status": "completed",
-  "description": "Payment to vendor",
-  "parent_tx_key": "txgroup_abc123xyz",
-  "created_at": "2025-12-21T16:00:00Z"
+    "id": "4a8b6a2e-9ad8-458a-8833-fb5eeb87a3db",
+    "transfer_type": "credit",
+    "from_account": null,
+    "to_account": "b163f805-401b-4a41-8afd-b2903c0c1704",
+    "amount": 0.9,
+    "currency": "inr",
+    "status": "completed",
+    "description": null,
+    "created_at": "2025-12-21T13:16:16.716756+00:00",
+    "idempotency_key": "dc17b628-1bae-49c9-9053-c5b99be0de29_credit",
+    "parent_tx_key": "txgroup_4ad94ec9-cbce-49f9-90af-23918bf84d0d"
 }
 ```
 
