@@ -12,7 +12,7 @@ A Containerized financial ledger system built in Rust. Designed for precision, r
 Backend system for handling multi-currency accounts and financial transactions. Unlike standard CRUD applications, it features custom-engineered components to ensure ACID guarantees, zero-precision-loss money handling, and optimal database performance.
 
 For deep technical details, architectures, and tradeoffs, please read the **[Design Document](DESIGN.md)**.
-For API usage, see the **[API Documentation](API.md)** or **[OpenAPI Spec](OPENAPI.md)**.
+For API usage, see the **[API Documentation](API.md)**.
 
 ## 🚀 Key Features
 
