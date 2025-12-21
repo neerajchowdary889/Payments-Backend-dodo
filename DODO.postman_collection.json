@@ -1,0 +1,739 @@
+{
+	"info": {
+		"_postman_id": "4ef12e10-9b4b-477d-9840-11ceceacc0af",
+		"name": "DODO",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "23162727",
+		"_collection_link": "https://minsteam.postman.co/workspace/d5f61816-42d7-425d-8b73-c7e9d43be72a/collection/23162727-4ef12e10-9b4b-477d-9840-11ceceacc0af?action=share&source=collection_link&creator=23162727"
+	},
+	"item": [
+		{
+			"name": "health",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/health",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"health"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "create_acccount",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"business_name\": \"Neeraj Games Pvt Ltd\",\n    \"email\": \"neeraj@gmail.com\",\n    \"currency\": \"USD\"\n  }",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/v1/accounts",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"accounts"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "create_acccount",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"business_name\": \"Neeraj Games Pvt Ltd\",\n    \"email\": \"neeraj@gmail.com\",\n    \"currency\": \"USD\"\n  }",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/api/v1/accounts",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"api",
+								"v1",
+								"accounts"
+							]
+						}
+					},
+					"status": "Created",
+					"code": 201,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "x-request-id",
+							"value": "a0b3f883-8422-4efb-b9b2-e86e5ba92e07"
+						},
+						{
+							"key": "vary",
+							"value": "origin, access-control-request-method, access-control-request-headers"
+						},
+						{
+							"key": "access-control-allow-origin",
+							"value": "*"
+						},
+						{
+							"key": "access-control-expose-headers",
+							"value": "*"
+						},
+						{
+							"key": "content-length",
+							"value": "273"
+						},
+						{
+							"key": "date",
+							"value": "Sun, 21 Dec 2025 13:16:43 GMT"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"account\": {\n        \"id\": \"e7aec6f0-0524-44f9-9058-bfc2dde986fe\",\n        \"business_name\": \"Neeraj Games Pvt Ltd\",\n        \"email\": \"neeraj@gmail.com\",\n        \"balance\": 0,\n        \"currency\": \"USD\",\n        \"status\": \"active\",\n        \"created_at\": \"2025-12-21T13:16:43.587284+00:00\"\n    },\n    \"api_key\": \"pk_live_3d233007f7f8ccb740b89ecf6ed07683\"\n}"
+				}
+			]
+		},
+		{
+			"name": "get_account",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_3d233007f7f8ccb740b89ecf6ed07683"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/v1/accounts/e7aec6f0-0524-44f9-9058-bfc2dde986fe",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"accounts",
+						"e7aec6f0-0524-44f9-9058-bfc2dde986fe"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "New Request",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer pk_live_3d233007f7f8ccb740b89ecf6ed07683"
+							}
+						],
+						"url": {
+							"raw": "http://localhost:3000/api/v1/accounts/e7aec6f0-0524-44f9-9058-bfc2dde986fe",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"api",
+								"v1",
+								"accounts",
+								"e7aec6f0-0524-44f9-9058-bfc2dde986fe"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "x-request-id",
+							"value": "0e582f8d-bcd0-48ad-9d2a-d0447ab574b7"
+						},
+						{
+							"key": "vary",
+							"value": "origin, access-control-request-method, access-control-request-headers"
+						},
+						{
+							"key": "access-control-allow-origin",
+							"value": "*"
+						},
+						{
+							"key": "access-control-expose-headers",
+							"value": "*"
+						},
+						{
+							"key": "content-length",
+							"value": "209"
+						},
+						{
+							"key": "date",
+							"value": "Sun, 21 Dec 2025 15:21:51 GMT"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"id\": \"e7aec6f0-0524-44f9-9058-bfc2dde986fe\",\n    \"business_name\": \"Neeraj Games Pvt Ltd\",\n    \"email\": \"neeraj@gmail.com\",\n    \"balance\": 30.9,\n    \"currency\": \"USD\",\n    \"status\": \"active\",\n    \"created_at\": \"2025-12-21T13:16:43.587284+00:00\"\n}"
+				}
+			]
+		},
+		{
+			"name": "put_balance",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"account_id\": \"58c297a9-4dc3-451c-a8a7-1202e3031248\",\n    \"balance\": 2000.50,\n    \"currency\": \"eur\"\n  }",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/v1/accounts/putbalance",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"accounts",
+						"putbalance"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "New Request",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer pk_live_3d233007f7f8ccb740b89ecf6ed07683"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"account_id\": \"e7aec6f0-0524-44f9-9058-bfc2dde986fe\",\n    \"balance\": 2000.50,\n    \"currency\": \"usd\"\n  }",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/api/v1/accounts/putbalance",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"api",
+								"v1",
+								"accounts",
+								"putbalance"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "x-request-id",
+							"value": "8e73c84f-3e1b-4e1e-bf22-af599694a9d1"
+						},
+						{
+							"key": "vary",
+							"value": "origin, access-control-request-method, access-control-request-headers"
+						},
+						{
+							"key": "access-control-allow-origin",
+							"value": "*"
+						},
+						{
+							"key": "access-control-expose-headers",
+							"value": "*"
+						},
+						{
+							"key": "content-length",
+							"value": "211"
+						},
+						{
+							"key": "date",
+							"value": "Sun, 21 Dec 2025 15:22:15 GMT"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"id\": \"e7aec6f0-0524-44f9-9058-bfc2dde986fe\",\n    \"business_name\": \"Neeraj Games Pvt Ltd\",\n    \"email\": \"neeraj@gmail.com\",\n    \"balance\": 2000.5,\n    \"currency\": \"usd\",\n    \"status\": \"active\",\n    \"created_at\": \"2025-12-21T13:16:43.587284+00:00\"\n}"
+				},
+				{
+					"name": "New Request",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"account_id\": \"58c297a9-4dc3-451c-a8a7-1202e3031248\",\n    \"balance\": 2000.50,\n    \"currency\": \"eur\"\n  }",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/api/v1/accounts/putbalance",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"api",
+								"v1",
+								"accounts",
+								"putbalance"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": null,
+					"header": [
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "x-request-id",
+							"value": "deebb61d-3bfd-4244-a1bd-d980d3b60763"
+						},
+						{
+							"key": "vary",
+							"value": "origin, access-control-request-method, access-control-request-headers"
+						},
+						{
+							"key": "access-control-allow-origin",
+							"value": "*"
+						},
+						{
+							"key": "access-control-expose-headers",
+							"value": "*"
+						},
+						{
+							"key": "content-length",
+							"value": "201"
+						},
+						{
+							"key": "date",
+							"value": "Sun, 21 Dec 2025 15:23:18 GMT"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"id\": \"58c297a9-4dc3-451c-a8a7-1202e3031248\",\n    \"business_name\": \"Neeraj\",\n    \"email\": \"Neeraj889@gmail.com\",\n    \"balance\": 2160.54,\n    \"currency\": \"eur\",\n    \"status\": \"active\",\n    \"created_at\": \"2025-12-21T06:20:01.968987+00:00\"\n}"
+				}
+			]
+		},
+		{
+			"name": "edit_account",
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"business_name\": \"Neeraj\",\n    \"email\": \"Neeraj889@gmail.com\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/v1/accounts/58c297a9-4dc3-451c-a8a7-1202e3031248",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"accounts",
+						"58c297a9-4dc3-451c-a8a7-1202e3031248"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "get_balance",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/v1/accounts/58c297a9-4dc3-451c-a8a7-1202e3031248/balance?currency=usd",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"accounts",
+						"58c297a9-4dc3-451c-a8a7-1202e3031248",
+						"balance"
+					],
+					"query": [
+						{
+							"key": "currency",
+							"value": "usd"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "transfer",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_3d233007f7f8ccb740b89ecf6ed07683"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"type\": \"transfer\",\n    \"from_account\": \"e7aec6f0-0524-44f9-9058-bfc2dde986fe\",\n    \"to_account\": \"58c297a9-4dc3-451c-a8a7-1202e3031248\",\n    \"amount\": 150.00,\n    \"currency\": \"USD\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/v1/transfer",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"transfer"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "get_txn",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/v1/transfer/txgroup_4ad94ec9-cbce-49f9-90af-23918bf84d0d",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"transfer",
+						"txgroup_4ad94ec9-cbce-49f9-90af-23918bf84d0d"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "txn_info",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/v1/transfer/info/4a8b6a2e-9ad8-458a-8833-fb5eeb87a3db",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"transfer",
+						"info",
+						"4a8b6a2e-9ad8-458a-8833-fb5eeb87a3db"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "transfer_list",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/v1/transfer/list?account_id=58c297a9-4dc3-451c-a8a7-1202e3031248",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"transfer",
+						"list"
+					],
+					"query": [
+						{
+							"key": "account_id",
+							"value": "58c297a9-4dc3-451c-a8a7-1202e3031248"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "set_webhooks",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_3d233007f7f8ccb740b89ecf6ed07683"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"account_id\": \"e7aec6f0-0524-44f9-9058-bfc2dde986fe\",\n    \"url\": \"https://webhook.site/15e3c4e5-1b13-4f11-b122-ff997721652b\",\n    \"secret\": \"ff997721652b\"\n  }",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/v1/webhooks/set",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"webhooks",
+						"set"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "get_webhook",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:3000/api/v1/webhooks/info?account_id=58c297a9-4dc3-451c-a8a7-1202e3031248",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"webhooks",
+						"info"
+					],
+					"query": [
+						{
+							"key": "account_id",
+							"value": "58c297a9-4dc3-451c-a8a7-1202e3031248"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "delete_webhook",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer pk_live_9a4d5dbeb9cef34e0f37075474740a65"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"webhook_id\": \"569a78c5-111c-4550-8d60-325997f771a8\"\n  }",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/v1/webhooks/unset",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"v1",
+						"webhooks",
+						"unset"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
