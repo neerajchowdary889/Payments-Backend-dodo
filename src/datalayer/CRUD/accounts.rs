@@ -398,14 +398,30 @@ impl AccountBuilder {
 
         let build_update = || {
             let mut update = FluentUpdate::table(Accounts::Table)
-                .value(Accounts::BusinessName, self.business_name.clone())
-                .value(Accounts::Email, self.email.clone())
-                .value(Accounts::Currency, currency.clone())
-                .value(Accounts::Balance, usd_balance)
-                .value(Accounts::Status, self.status.clone())
-                .value(Accounts::Metadata, self.metadata.clone())
                 .value(Accounts::UpdatedAt, chrono::Utc::now())
                 .filter(Accounts::Id, id);
+
+            // Only update fields that are provided
+            if let Some(business_name) = self.business_name.clone() {
+                update = update.value(Accounts::BusinessName, business_name);
+            }
+            if let Some(email) = self.email.clone() {
+                update = update.value(Accounts::Email, email);
+            }
+            if let Some(status) = self.status.clone() {
+                update = update.value(Accounts::Status, status);
+            }
+            if let Some(metadata) = self.metadata.clone() {
+                update = update.value(Accounts::Metadata, metadata);
+            }
+
+            // Only update balance and currency if balance is provided
+            if self.balance.is_some() {
+                update = update.value(Accounts::Balance, usd_balance);
+                if let Some(curr) = currency.clone() {
+                    update = update.value(Accounts::Currency, curr);
+                }
+            }
 
             if get_id {
                 update = update.returning(Accounts::Id);

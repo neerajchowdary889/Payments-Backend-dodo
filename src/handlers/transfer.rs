@@ -1,10 +1,14 @@
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query},
     http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use tracing::{info, instrument};
 use uuid::Uuid;
+
+use crate::middleware::auth::AuthenticatedApiKey;
 
 // ===== REQUEST DTOs =====
 
@@ -17,7 +21,8 @@ pub enum TransferRequest {
         amount: f64,
         currency: String,
         description: Option<String>,
-        idempotency_key: String,
+        #[serde(default)]
+        idempotency_key: Option<String>,
     },
     /// Debit: Remove funds from an account (to_account is null)
     Debit {
@@ -25,7 +30,8 @@ pub enum TransferRequest {
         amount: f64,
         currency: String,
         description: Option<String>,
-        idempotency_key: String,
+        #[serde(default)]
+        idempotency_key: Option<String>,
     },
     /// Transfer: Move funds between accounts
     Transfer {
@@ -34,7 +40,8 @@ pub enum TransferRequest {
         amount: f64,
         currency: String,
         description: Option<String>,
-        idempotency_key: String,
+        #[serde(default)]
+        idempotency_key: Option<String>,
     },
 }
 
@@ -59,6 +66,7 @@ pub struct TransferResponse {
     pub description: Option<String>,
     pub created_at: String,
     pub idempotency_key: String,
+    pub parent_tx_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,86 +81,113 @@ pub struct TransferListResponse {
 
 /// POST /api/v1/transfer
 /// Execute a transfer (credit, debit, or transfer)
+#[instrument(fields(service = "/api/v1/transfer"))]
 pub async fn transfer(
+    auth_info: axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     Json(payload): Json<TransferRequest>,
-) -> Result<(StatusCode, Json<TransferResponse>), StatusCode> {
-    // TODO: Implement transfer
-    // 1. Validate request
-    // 2. Match on transfer type
-    // 3. For credit: Call TransferHelper::credit()
-    // 4. For debit: Call TransferHelper::debit()
-    // 5. For transfer: Call TransferHelper::transfer()
-    // 6. Return transaction details
-
-    match &payload {
-        TransferRequest::Credit {
-            to_account, amount, ..
-        } => {
-            tracing::info!(
-                to_account = %to_account,
-                amount = %amount,
-                "Processing credit transfer"
-            );
-        }
-        TransferRequest::Debit {
-            from_account,
-            amount,
-            ..
-        } => {
-            tracing::info!(
-                from_account = %from_account,
-                amount = %amount,
-                "Processing debit transfer"
-            );
-        }
-        TransferRequest::Transfer {
-            from_account,
-            to_account,
-            amount,
-            ..
-        } => {
-            tracing::info!(
-                from_account = %from_account,
-                to_account = %to_account,
-                amount = %amount,
-                "Processing transfer"
-            );
-        }
-    }
-
-    Err(StatusCode::NOT_IMPLEMENTED)
+) -> Response {
+    info!("Executing transfer with payload: {:?}", payload);
+    // Delegate to controller
+    crate::controllayer::transfers::execute_transfer(auth_info, Json(payload)).await
 }
 
 /// GET /api/v1/transfer/:id
-/// Get transfer details by ID
-pub async fn get_transfer(
-    Path(transfer_id): Path<Uuid>,
-) -> Result<Json<TransferResponse>, StatusCode> {
-    // TODO: Implement get transfer
-    // 1. Fetch transaction using TransactionBuilder
-    // 2. Return transaction details
+/// Get transfer details by parent key
+/// this will return the information about the transaction based on the parent key
+#[instrument(fields(service = "/api/v1/transfer/:id"))]
+pub async fn get_transfer_byparentkey(
+    Extension(auth_info): Extension<AuthenticatedApiKey>,
+    Path(parent_key): Path<String>,
+) -> Response {
+    tracing::info!(parent_key = %parent_key, account_id = %auth_info.account_id, "Getting transfer details by parent key");
 
-    tracing::info!(transfer_id = %transfer_id, "Getting transfer details");
-
-    Err(StatusCode::NOT_IMPLEMENTED)
+    match crate::controllayer::transfers::queries::get_transfer_by_parent_key(
+        parent_key,
+        auth_info.account_id,
+    )
+    .await
+    {
+        Ok(transfers) => (StatusCode::OK, Json(transfers)).into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
-/// GET /api/v1/transfer
-/// List transfers with optional filtering
-pub async fn list_transfers(
-    Query(params): Query<ListTransfersQuery>,
-) -> Result<Json<TransferListResponse>, StatusCode> {
-    // TODO: Implement list transfers
-    // 1. Parse query parameters
-    // 2. Fetch transactions using TransactionBuilder
-    // 3. Return paginated list
+/// GET /api/v1/transfer/info/:id
+/// Get transfer details by ID
+/// this will return the information about the transaction based on the id
+#[instrument(fields(service = "/api/v1/transfer/info/:id"))]
+pub async fn get_transfer_byid(
+    Extension(auth_info): Extension<AuthenticatedApiKey>,
+    Path(transfer_id): Path<Uuid>,
+) -> Response {
+    tracing::info!(transfer_id = %transfer_id, account_id = %auth_info.account_id, "Getting transfer details by ID");
 
+    match crate::controllayer::transfers::queries::get_transfer_by_id(
+        transfer_id,
+        auth_info.account_id,
+    )
+    .await
+    {
+        Ok(transfer) => (StatusCode::OK, Json(transfer)).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// GET /api/v1/transfer/list
+/// List transfers with optional filtering
+/// return all the Transaction::Type Transfer transactions by the user
+#[instrument(fields(service = "/api/v1/transfer/list"))]
+pub async fn list_transfers(
+    Extension(auth_info): Extension<AuthenticatedApiKey>,
+    Query(params): Query<ListTransfersQuery>,
+) -> Response {
     tracing::info!(
-        account_id = ?params.account_id,
+        account_id = %auth_info.account_id,
+        requested_account_id = ?params.account_id,
         limit = ?params.limit,
         offset = ?params.offset,
         "Listing transfers"
     );
 
-    Err(StatusCode::NOT_IMPLEMENTED)
+    // Require account_id parameter
+    let requested_account_id = match params.account_id {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": {
+                        "code": "MISSING_ACCOUNT_ID",
+                        "message": "account_id parameter is required"
+                    }
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Verify requested account_id matches authenticated user's account
+    if requested_account_id != auth_info.account_id {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "You can only view transfers for your own account"
+                }
+            })),
+        )
+            .into_response();
+    }
+
+    match crate::controllayer::transfers::queries::list_transfers(
+        auth_info.account_id,
+        params.limit,
+        params.offset,
+    )
+    .await
+    {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(e) => e.into_response(),
+    }
 }

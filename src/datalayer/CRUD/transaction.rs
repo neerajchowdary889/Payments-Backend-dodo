@@ -1,7 +1,7 @@
 use super::types::{Transaction, TransactionStatus, TransactionType};
 use crate::datalayer::CRUD::accounts::AccountBuilder;
 use crate::datalayer::CRUD::helper::transaction::TransactionHelper;
-use crate::datalayer::CRUD::money;
+use crate::datalayer::CRUD::money::{self, conversion};
 use crate::datalayer::CRUD::sql_generator::sql_generator::{
     FluentInsert, FluentSelect, FluentUpdate,
 };
@@ -847,11 +847,24 @@ impl TransactionBuilder {
                 .map_err(|_| ServiceError::AccountNotFound(from_account_id.to_string()))?;
 
             // Check if account has sufficient balance
+            // amount given here is not in usd - so need to convert to usd
+            // balance from db would be in the usd
             if let Some(amount) = self.amount {
-                if from_account.balance < amount {
+                // Determine transaction currency
+                let transaction_currency = if let Some(ref curr) = self.currency {
+                    curr.clone()
+                } else {
+                    from_account.currency.clone()
+                };
+
+                // Convert to Currency enum and then to USD
+                let currency_enum = conversion::map_currency(transaction_currency)?;
+                let converted_amount = conversion::to_usd(amount, currency_enum)?;
+
+                if from_account.balance < converted_amount {
                     return Err(ServiceError::InsufficientBalance {
                         account_id: from_account_id.to_string(),
-                        required: amount,
+                        required: converted_amount,
                     });
                 }
             }
@@ -883,38 +896,51 @@ impl TransactionBuilder {
             if let Some(parent_tx_key) = self.parent_tx_key.as_ref() {
                 match transaction_type {
                     TransactionType::Debit => {
-                        // For Debit, verify that a Transfer transaction with this parent_tx_key exists
+                        // For Debit, verify that a Transfer transaction exists where:
+                        // 1. Transfer parent_tx_key = Debit parent_tx_key (same transaction group)
+                        // 2. Transfer from_account_id = Debit from_account_id
                         println!(
-                            ">>>> DEBUG :: Debit validation - looking for Transfer with parent_tx_key: {}",
-                            parent_tx_key
-                        );
-                        let transfer_exists = TransactionBuilder::new()
-                            .transaction_type(TransactionType::Transfer)
-                            .parent_tx_key(parent_tx_key.clone())
-                            .expect_id()
-                            .expect_amount()
-                            .expect_parent_tx_key()
-                            .expect_currency()
-                            .expect_status()
-                            .expect_created_at()
-                            .expect_idempotency_key()
-                            .expect_transaction_type()
-                            .read(Some(conn))
-                            .await;
-
-                        println!(
-                            ">>>> DEBUG :: Transfer lookup result: {:?}",
-                            transfer_exists
-                                .as_ref()
-                                .map(|t| (&t.id, &t.parent_tx_key))
-                                .map_err(|e| format!("{:?}", e))
+                            ">>>> DEBUG :: Debit validation - looking for Transfer with parent_tx_key: {} and from_account: {:?}",
+                            parent_tx_key, self.from_account_id
                         );
 
-                        if transfer_exists.is_err() {
-                            return Err(ServiceError::ValidationError(format!(
-                                "No transfer transaction found with parent_tx_key: {}",
-                                parent_tx_key
-                            )));
+                        // Skip validation if parent_tx_key is NULL (standalone debit)
+                        if parent_tx_key != "NULL" {
+                            let transfer_exists = TransactionBuilder::new()
+                                .transaction_type(TransactionType::Transfer)
+                                .parent_tx_key(parent_tx_key.clone())
+                                .from_account_id(self.from_account_id.unwrap())
+                                .expect_id()
+                                .expect_amount()
+                                .expect_parent_tx_key()
+                                .expect_currency()
+                                .expect_status()
+                                .expect_created_at()
+                                .expect_idempotency_key()
+                                .expect_transaction_type()
+                                .expect_from_account_id()
+                                .read(Some(conn))
+                                .await;
+
+                            println!(
+                                ">>>> DEBUG :: Transfer lookup result: {:?}",
+                                transfer_exists
+                                    .as_ref()
+                                    .map(|t| (
+                                        &t.id,
+                                        &t.transaction_type,
+                                        &t.parent_tx_key,
+                                        &t.from_account_id
+                                    ))
+                                    .map_err(|e| format!("{:?}", e))
+                            );
+
+                            if transfer_exists.is_err() {
+                                return Err(ServiceError::ValidationError(format!(
+                                    "No transfer transaction found with parent_tx_key: {} and matching from_account",
+                                    parent_tx_key
+                                )));
+                            }
                         }
                     }
                     TransactionType::Credit => {

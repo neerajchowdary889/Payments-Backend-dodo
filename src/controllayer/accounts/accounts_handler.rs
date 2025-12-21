@@ -248,7 +248,7 @@ pub async fn create_account(Json(payload): Json<CreateAccountRequest>) -> Respon
 /// 5. Returns the updated account details
 #[instrument(fields(service = "/api/v1/accounts/putbalance"))]
 pub async fn update_balance(
-    request: axum::extract::Request,
+    axum::Extension(auth_info): axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     Json(payload): Json<PutBalanceRequest>,
 ) -> Response {
     tracing::info!(
@@ -258,28 +258,10 @@ pub async fn update_balance(
         "Updating account balance"
     );
 
-    // Extract authenticated API key info from request extensions
-    let auth_info = request
-        .extensions()
-        .get::<crate::middleware::auth::AuthenticatedApiKey>();
-
-    let authenticated_account_id = match auth_info {
-        Some(info) => info.account_id,
-        None => {
-            tracing::error!("No authentication info found in request");
-            return create_error_response(
-                StatusCode::UNAUTHORIZED,
-                "missing_authentication",
-                "Authentication required",
-                None,
-            );
-        }
-    };
-
     // Authorization check: Verify the API key belongs to the account being accessed
-    if authenticated_account_id != payload.account_id {
+    if auth_info.account_id != payload.account_id {
         tracing::warn!(
-            authenticated_account_id = %authenticated_account_id,
+            authenticated_account_id = %auth_info.account_id,
             requested_account_id = %payload.account_id,
             "Authorization failed: API key does not belong to the requested account"
         );
@@ -448,33 +430,15 @@ pub async fn update_balance(
 
 #[instrument(fields(service = "/api/v1/accounts/get"))]
 pub async fn get_account(
-    request: axum::extract::Request,
+    axum::Extension(auth_info): axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     Json(payload): Json<GetAccountRequest>,
 ) -> Response {
     tracing::info!(account_id = %payload.account_id, "Getting account");
 
-    // Extract authenticated API key info from request extensions
-    let auth_info = request
-        .extensions()
-        .get::<crate::middleware::auth::AuthenticatedApiKey>();
-
-    let authenticated_account_id = match auth_info {
-        Some(info) => info.account_id,
-        None => {
-            tracing::error!("No authentication info found in request");
-            return create_error_response(
-                StatusCode::UNAUTHORIZED,
-                "missing_authentication",
-                "Authentication required",
-                None,
-            );
-        }
-    };
-
     // Authorization check: Verify the API key belongs to the account being accessed
-    if authenticated_account_id != payload.account_id {
+    if auth_info.account_id != payload.account_id {
         tracing::warn!(
-            authenticated_account_id = %authenticated_account_id,
+            authenticated_account_id = %auth_info.account_id,
             requested_account_id = %payload.account_id,
             "Authorization failed: API key does not belong to the requested account"
         );
@@ -596,7 +560,7 @@ pub async fn get_account(
 /// Note: This does NOT update balance or currency - use update_balance for that
 #[instrument(fields(service = "/api/v1/accounts/update"))]
 pub async fn update_account(
-    request: axum::extract::Request,
+    axum::Extension(auth_info): axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     account_id: Uuid,
     Json(payload): Json<UpdateAccountRequest>,
 ) -> Response {
@@ -608,28 +572,10 @@ pub async fn update_account(
         "Updating account details"
     );
 
-    // Extract authenticated API key info from request extensions
-    let auth_info = request
-        .extensions()
-        .get::<crate::middleware::auth::AuthenticatedApiKey>();
-
-    let authenticated_account_id = match auth_info {
-        Some(info) => info.account_id,
-        None => {
-            tracing::error!("No authentication info found in request");
-            return create_error_response(
-                StatusCode::UNAUTHORIZED,
-                "missing_authentication",
-                "Authentication required",
-                None,
-            );
-        }
-    };
-
     // Authorization check: Verify the API key belongs to the account being accessed
-    if authenticated_account_id != account_id {
+    if auth_info.account_id != account_id {
         tracing::warn!(
-            authenticated_account_id = %authenticated_account_id,
+            authenticated_account_id = %auth_info.account_id,
             requested_account_id = %account_id,
             "Authorization failed: API key does not belong to the requested account"
         );

@@ -21,7 +21,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Stores business account information and balances
 CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    business_name VARCHAR(255) NOT NULL,
+    business_name VARCHAR(255) UNIQUE NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     
     -- Balance tracking (stored in smallest currency unit, e.g., cents)

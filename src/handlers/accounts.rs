@@ -94,7 +94,7 @@ pub async fn create_account(payload: Json<CreateAccountRequest>) -> Response {
     response
 }
 
-/// PUT /api/v1/accounts/:id/balance
+/// PUT /api/v1/accounts/putbalance
 /// Update account balance
 ///
 /// This endpoint delegates to the controller layer which handles:
@@ -103,11 +103,10 @@ pub async fn create_account(payload: Json<CreateAccountRequest>) -> Response {
 /// 3. Account existence verification
 /// 4. Balance and optional currency update
 /// 5. Returning updated account details
-#[instrument(fields(service = "/api/v1/accounts/:id/putbalance"))]
+#[instrument(fields(service = "/api/v1/accounts/putbalance"))]
 pub async fn put_balance(
-    Path(account_id): Path<Uuid>,
+    axum::Extension(auth_info): axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     Json(payload): Json<PutBalanceRequest>,
-    request: axum::extract::Request,
 ) -> Response {
     info!(
         account_id = %payload.account_id,
@@ -116,15 +115,9 @@ pub async fn put_balance(
         "Updating account balance"
     );
 
-    // Create the request payload with account_id from path
-    let request_payload = Json(PutBalanceRequest {
-        account_id,
-        balance: payload.balance,
-        currency: payload.currency,
-    });
-
-    // Delegate to the controller handler with request for auth
-    let response = accounts_handler::update_balance(request, request_payload).await;
+    // Delegate to the controller handler (auth checking happens in controller via Extension)
+    let response =
+        accounts_handler::update_balance(axum::Extension(auth_info), Json(payload)).await;
 
     // Return the response from the controller handler
     // log the response code
@@ -145,16 +138,16 @@ pub async fn put_balance(
 /// 3. Returning account details
 #[instrument(fields(service = "/api/v1/accounts/:id"))]
 pub async fn get_account(
+    axum::Extension(auth_info): axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     Path(account_id): Path<Uuid>,
-    request: axum::extract::Request,
 ) -> Response {
     info!(account_id = %account_id, "Getting account details");
 
     // Create the request payload with account_id from path
     let payload = Json(GetAccountRequest { account_id });
 
-    // Delegate to the controller handler with the full request for auth checking
-    let response = accounts_handler::get_account(request, payload).await;
+    // Delegate to the controller handler (auth checking happens in controller via Extension)
+    let response = accounts_handler::get_account(axum::Extension(auth_info), payload).await;
 
     // Return the response from the controller handler
     // log the response code
@@ -172,9 +165,9 @@ pub async fn get_account(
 /// 3. Returning updated account details
 #[instrument(fields(service = "/api/v1/accounts/:id"))]
 pub async fn update_account(
+    axum::Extension(auth_info): axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     Path(account_id): Path<Uuid>,
     Json(payload): Json<UpdateAccountRequest>,
-    request: axum::extract::Request,
 ) -> Response {
     info!(
         account_id = %account_id,
@@ -184,8 +177,10 @@ pub async fn update_account(
         "Updating account details"
     );
 
-    // Delegate to the controller handler with account_id and payload
-    let response = accounts_handler::update_account(request, account_id, Json(payload)).await;
+    // Delegate to the controller handler (auth checking happens in controller via Extension)
+    let response =
+        accounts_handler::update_account(axum::Extension(auth_info), account_id, Json(payload))
+            .await;
 
     // Log the response
     info!(
@@ -209,9 +204,9 @@ pub struct GetBalanceRequest {
 /// Authorization: API key must belong to the account
 #[instrument(fields(service = "/api/v1/accounts/:id/balance"))]
 pub async fn get_balance(
+    axum::Extension(auth_info): axum::Extension<crate::middleware::auth::AuthenticatedApiKey>,
     Path(account_id): Path<Uuid>,
     axum::extract::Query(query): axum::extract::Query<GetBalanceRequest>,
-    request: axum::extract::Request,
 ) -> Response {
     info!(
         account_id = %account_id,
@@ -222,8 +217,8 @@ pub async fn get_balance(
     // Create the request payload with account_id from path
     let payload = Json(GetAccountRequest { account_id });
 
-    // Reuse the get_account controller function (which includes authorization)
-    let response = accounts_handler::get_account(request, payload).await;
+    // Reuse the get_account controller function (which includes authorization via Extension)
+    let response = accounts_handler::get_account(axum::Extension(auth_info), payload).await;
 
     // Check if we got the account successfully
     if response.status() != StatusCode::OK {
