@@ -75,8 +75,6 @@ docker-compose logs -f app
 | ------------------------------------ | ------------------------------------------------------------------------------ |
 | **[DESIGN.md](DESIGN.md)**           | **Start Here**. detailed architecture, data models, and engineering decisions. |
 | **[API.md](API.md)**                 | Developer basics: Endpoints, Request/Response examples, and curl commands.     |
-| **[OPENAPI.md](OPENAPI.md)**         | Formal API specification.                                                      |
-| **[API_TESTING.md](API_TESTING.md)** | Guide for running integration tests.                                           |
 
 ---
 
