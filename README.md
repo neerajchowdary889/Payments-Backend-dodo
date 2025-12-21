@@ -89,8 +89,3 @@ cargo test
 # Run specific integration test
 cargo test --test transfer_flow_test
 ```
-
-### 📡 API Testing
-
-You can import the official Postman Collection to test all endpoints:
-[![Run in Postman](https://run.pstmn.io/button.svg)](https://minsteam.postman.co/workspace/d5f61816-42d7-425d-8b73-c7e9d43be72a/collection/23162727-fb46f619-3965-4923-82a6-735bfffcc36b?action=share&source=copy-link&creator=23162727)
