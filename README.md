@@ -89,3 +89,5 @@ cargo test
 # Run specific integration test
 cargo test --test transfer_flow_test
 ```
+## API Testing
+- Add the DODO.postman_collection.json to the Postman for API testing.
