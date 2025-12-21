@@ -67,16 +67,6 @@ docker-compose up -d
 docker-compose logs -f app
 ```
 
-### Local Development
-
-```bash
-# Run migrations
-sqlx migrate run
-
-# Start server
-cargo run
-```
-
 ---
 
 ## 📚 Documentation Map
