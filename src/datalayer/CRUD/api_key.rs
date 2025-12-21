@@ -423,7 +423,6 @@ impl ApiKeyBuilder {
             let mut update = FluentUpdate::table(ApiKeys::Table)
                 .value(ApiKeys::Name, self.name.clone())
                 .value(ApiKeys::Status, self.status.clone())
-
                 .value(ApiKeys::Permissions, self.permissions.clone())
                 .value(ApiKeys::LastUsedAt, self.last_used_at)
                 .value(ApiKeys::ExpiresAt, self.expires_at)

@@ -358,3 +358,23 @@ impl From<validator::ValidationErrors> for ServiceError {
 
 /// Type alias for Results using ServiceError
 pub type ServiceResult<T> = Result<T, ServiceError>;
+
+/// Helper to create standardized error responses with request IDs
+/// This is useful for middleware and other contexts where you need to create
+/// error responses without using the ServiceError enum
+pub fn create_error_response(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    request_id: Option<String>,
+) -> Response {
+    let error_response = ErrorResponse {
+        error: ErrorDetail {
+            code: code.to_string(),
+            message: message.to_string(),
+            details: request_id.map(|id| serde_json::json!({ "request_id": id })),
+        },
+    };
+
+    (status, Json(error_response)).into_response()
+}

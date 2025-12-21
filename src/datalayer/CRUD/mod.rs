@@ -6,5 +6,6 @@ pub mod rate_limiter;
 pub mod sql_generator;
 pub mod transaction;
 pub mod types;
+pub mod redis;
 
 pub use crate::datalayer::*;

@@ -1,7 +1,9 @@
 use crate::datalayer::CRUD::api_key::ApiKeyBuilder;
+use crate::datalayer::CRUD::redis::redis::RateLimitCounter;
 use crate::datalayer::db_ops::constants::POOL_STATE_TRACKER;
 use crate::datalayer::helper::backoff::ExponentialBackoff;
 use crate::errors::errors::ServiceError;
+use redis::aio::ConnectionManager;
 use uuid::Uuid;
 
 /// Backoff-based rate limiter
@@ -55,47 +57,31 @@ impl RateLimiter {
         }
     }
 
-    /// Check rate limit with automatic backoff
-    ///
-    /// # Arguments
-    ///
-    /// * `api_key_id` - The UUID of the API key
-    /// * `api_key_prefix` - The prefix of the API key (for error messages)
-    /// * `current_count` - Current request count for this API key
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Request allowed (may have applied backoff delay)
-    /// * `Err(ServiceError)` - Request blocked (hard limit exceeded or invalid key)
-    ///
-    /// # Behavior
-    ///
-    /// - count < soft_limit: Allow immediately
-    /// - soft_limit <= count < hard_limit: Apply exponential backoff, then allow
-    /// - count >= hard_limit: Reject with RateLimitExceeded error
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let limiter = RateLimiter::new();
-    /// let current_count = 7; // Example count from cache
-    /// limiter.check_with_backoff(api_key_id, &prefix, current_count).await?;
-    /// ```
+    /// Check rate limit with backoff for an API key and endpoint
+    /// Automatically tracks request count in Redis
     pub async fn check_with_backoff(
         &self,
         api_key_id: Uuid,
         api_key_prefix: &str,
-        current_count: u32,
+        endpoint: &str,
+        redis_conn: ConnectionManager,
     ) -> Result<(), ServiceError> {
         // Validate API key first
         self.validate_api_key(api_key_id, api_key_prefix).await?;
+
+        // Get current count from Redis
+        let mut counter = RateLimitCounter::new(redis_conn.clone());
+        let current_count = counter
+            .get_count(api_key_id, endpoint)
+            .await
+            .map_err(|e| ServiceError::DatabaseError(format!("Redis error: {}", e)))?;
 
         // Check hard limit
         if current_count >= self.hard_limit {
             return Err(ServiceError::RateLimitExceeded {
                 limit: self.hard_limit as i32,
-                window: "total".to_string(),
-                reset_at: chrono::Utc::now() + chrono::Duration::minutes(1),
+                window: endpoint.to_string(),
+                reset_at: chrono::Utc::now() + chrono::Duration::seconds(60),
             });
         }
 
@@ -109,19 +95,27 @@ impl RateLimiter {
 
             let delay_ms = backoff.calculate(attempts_over_soft);
 
-            println!(
-                "⏳ Rate limit soft threshold exceeded (request {}), applying {}ms backoff...",
-                current_count + 1,
-                delay_ms
+            tracing::warn!(
+                api_key_id = %api_key_id,
+                endpoint = %endpoint,
+                request_count = current_count + 1,
+                delay_ms = delay_ms,
+                "Rate limit soft threshold exceeded, applying backoff"
             );
 
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
         }
 
+        // Increment counter in Redis
+        counter
+            .increment_count(api_key_id, endpoint)
+            .await
+            .map_err(|e| ServiceError::DatabaseError(format!("Redis error: {}", e)))?;
+
         Ok(())
     }
 
-    /// Validate that the API key is active and not revoked
+    /// Validate that the API key exists and is active
     async fn validate_api_key(
         &self,
         api_key_id: Uuid,
@@ -172,6 +166,34 @@ impl RateLimiter {
 
         Ok(())
     }
+
+    /// Get current request count for an API key and endpoint
+    pub async fn get_count(
+        &self,
+        api_key_id: Uuid,
+        endpoint: &str,
+        redis_conn: ConnectionManager,
+    ) -> Result<u32, ServiceError> {
+        let mut counter = RateLimitCounter::new(redis_conn);
+        counter
+            .get_count(api_key_id, endpoint)
+            .await
+            .map_err(|e| ServiceError::DatabaseError(format!("Redis error: {}", e)))
+    }
+
+    /// Reset rate limit counter for an API key and endpoint
+    pub async fn reset_count(
+        &self,
+        api_key_id: Uuid,
+        endpoint: &str,
+        redis_conn: ConnectionManager,
+    ) -> Result<(), ServiceError> {
+        let mut counter = RateLimitCounter::new(redis_conn);
+        counter
+            .reset_count(api_key_id, endpoint)
+            .await
+            .map_err(|e| ServiceError::DatabaseError(format!("Redis error: {}", e)))
+    }
 }
 
 #[cfg(test)]
@@ -183,8 +205,8 @@ mod tests {
         let limiter = RateLimiter::new();
         assert_eq!(limiter.soft_limit, 5);
         assert_eq!(limiter.hard_limit, 15);
-        assert_eq!(limiter.base_delay_ms, 100);
-        assert_eq!(limiter.max_delay_ms, 5000);
+        assert_eq!(limiter.base_delay_ms, 1000);
+        assert_eq!(limiter.max_delay_ms, 20000);
     }
 
     #[test]
